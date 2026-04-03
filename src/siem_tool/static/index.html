@@ -213,6 +213,10 @@
           <div class="card-header">
             <span>Correlated Security Incidents</span>
             <div class="card-actions">
+              <div class="incident-ticket-tabs" id="incident-ticket-tabs">
+                <button class="btn btn-ghost btn-mini incident-ticket-tab active" id="incident-tab-open" type="button">Open Tickets</button>
+                <button class="btn btn-ghost btn-mini incident-ticket-tab" id="incident-tab-closed" type="button">Closed Tickets</button>
+              </div>
               <select class="filter-select" id="incident-status-filter">
                 <option value="">All statuses</option>
                 <option value="open">Open</option>
@@ -540,9 +544,14 @@
           </div>
         </div>
 
-        <div class="two-col">
-          <div class="card">
-            <div class="card-header"><span>Top Flows</span></div>
+        <div class="two-col packets-analytics-grid">
+          <div class="card analytics-card" id="packet-flows-card">
+            <div class="card-header">
+              <span>Top Flows</span>
+              <div class="card-actions">
+                <button class="btn btn-ghost btn-mini" id="packet-flows-toggle-btn">Expand</button>
+              </div>
+            </div>
             <div class="table-wrap">
               <table class="data-table" id="packet-flows-table">
                 <thead>
@@ -558,8 +567,13 @@
             </div>
           </div>
 
-          <div class="card">
-            <div class="card-header"><span>Top Conversations</span></div>
+          <div class="card analytics-card" id="packet-conversations-card">
+            <div class="card-header">
+              <span>Top Conversations</span>
+              <div class="card-actions">
+                <button class="btn btn-ghost btn-mini" id="packet-conversations-toggle-btn">Expand</button>
+              </div>
+            </div>
             <div class="table-wrap">
               <table class="data-table" id="packet-conversations-table">
                 <thead>

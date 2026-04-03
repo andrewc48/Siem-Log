@@ -499,3 +499,67 @@ button { cursor: pointer; border: none; }
 }
 
 #view-packets .card-actions { flex-wrap: wrap; }
+
+#view-packets > .card:first-child .table-wrap {
+  max-height: 76vh;
+}
+
+.packets-analytics-grid {
+  align-items: start;
+}
+
+.packets-analytics-grid .analytics-card .table-wrap {
+  max-height: 130px;
+}
+
+.packets-analytics-grid .analytics-card.is-expanded .table-wrap {
+  max-height: 320px;
+}
+
+/* ── Incidents compact table ───────────────────────────────── */
+#incidents-table {
+  font-size: 12px;
+}
+
+#incidents-table th,
+#incidents-table td {
+  padding: 8px 10px;
+}
+
+#incidents-table td {
+  white-space: normal;
+}
+
+#incidents-table .incident-input {
+  width: 100%;
+  min-width: 0;
+  max-width: 160px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+#incidents-table .incident-input-owner { max-width: 110px; }
+#incidents-table .incident-input-sla { max-width: 62px; }
+#incidents-table .incident-input-due { max-width: 138px; }
+#incidents-table .incident-input-reopen { max-width: 128px; }
+#incidents-table .incident-input-notes { max-width: 140px; }
+
+#incidents-table .incident-actions-cell {
+  white-space: normal;
+  min-width: 210px;
+}
+
+#incidents-table .incident-actions-cell .btn {
+  margin: 2px 2px 0 0;
+}
+
+.incident-ticket-tabs {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.incident-ticket-tab.active {
+  border-color: var(--accent);
+  color: var(--text);
+  background: var(--accent-dim);
+}

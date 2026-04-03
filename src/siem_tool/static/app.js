@@ -21,6 +21,7 @@
     hostRisk: [],
     attackChains: [],
     savedViews: [],
+    incidentTicketTab: 'open',
   };
 
   /* ═══════════════════════ Utilities ════════════════════════ */
@@ -578,9 +579,37 @@
   async function fetchIncidents() {
     try {
       S.incidents = await apiFetch('GET', '/api/incidents?limit=200');
-      renderIncidents();
+      if (!isIncidentEditorActive()) {
+        renderIncidents();
+      }
       renderOverviewIncidentsFeed();
     } catch (_) {}
+  }
+
+  function isIncidentEditorActive() {
+    const active = document.activeElement;
+    if (!active) return false;
+    const inIncidentsView = !!active.closest('#view-incidents');
+    if (!inIncidentsView) return false;
+    return active.matches('[data-incident-owner], [data-incident-notes], [data-incident-sla], [data-incident-due], [data-incident-reopen]');
+  }
+
+  function setIncidentTicketTab(tab) {
+    S.incidentTicketTab = tab === 'closed' ? 'closed' : 'open';
+    const openBtn = document.getElementById('incident-tab-open');
+    const closedBtn = document.getElementById('incident-tab-closed');
+    openBtn?.classList.toggle('active', S.incidentTicketTab === 'open');
+    closedBtn?.classList.toggle('active', S.incidentTicketTab === 'closed');
+
+    const statusFilter = document.getElementById('incident-status-filter');
+    if (statusFilter) {
+      if (S.incidentTicketTab === 'closed') {
+        statusFilter.value = 'closed';
+      } else if (String(statusFilter.value || '').toLowerCase() === 'closed') {
+        statusFilter.value = '';
+      }
+    }
+    renderIncidents();
   }
 
   async function fetchHostRisk() {
@@ -632,6 +661,7 @@
       return {
         status: document.getElementById('incident-status-filter')?.value || '',
         query: document.getElementById('incident-search')?.value || '',
+        ticket_tab: S.incidentTicketTab || 'open',
       };
     }
     if (scope === 'traffic') {
@@ -658,6 +688,7 @@
       const q = document.getElementById('incident-search');
       if (status) status.value = String(c.status || '');
       if (q) q.value = String(c.query || '');
+      setIncidentTicketTab(String(c.ticket_tab || 'open').toLowerCase() === 'closed' ? 'closed' : 'open');
       renderIncidents();
       return;
     }
@@ -843,6 +874,10 @@
     const statusF = String(document.getElementById('incident-status-filter')?.value || '').toLowerCase();
     const q = String(document.getElementById('incident-search')?.value || '').toLowerCase();
     const rows = (Array.isArray(S.incidents) ? S.incidents : [])
+      .filter((i) => {
+        const st = String(i.status || 'open').toLowerCase();
+        return S.incidentTicketTab === 'closed' ? st === 'closed' : st !== 'closed';
+      })
       .filter((i) => !statusF || String(i.status || 'open').toLowerCase() === statusF)
       .filter((i) => {
         if (!q) return true;
@@ -853,7 +888,10 @@
       })
       .slice(0, 200);
     if (!rows.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="14">No active correlated incidents</td></tr>';
+      const emptyText = S.incidentTicketTab === 'closed'
+        ? 'No closed correlated incidents'
+        : 'No open correlated incidents';
+      tbody.innerHTML = `<tr class="empty-row"><td colspan="14">${emptyText}</td></tr>`;
       return;
     }
     tbody.innerHTML = rows.map(i => {
@@ -868,25 +906,25 @@
         <td>${esc(i.family || 'general')}</td>
         <td><code>${esc(i.actor || 'unknown')}</code></td>
         <td>
-          <input class="search-box" style="min-width:120px" data-incident-owner="${esc(i.incident_key)}" value="${esc(i.owner || '')}" placeholder="owner" />
+          <input class="search-box incident-input incident-input-owner" data-incident-owner="${esc(i.incident_key)}" value="${esc(i.owner || '')}" placeholder="owner" />
         </td>
         <td>${esc(i.alert_count ?? 0)}</td>
         <td>${esc(i.score ?? 0)}</td>
         <td class="text-muted text-sm">${esc((i.related_rules || []).join(', ') || '—')}</td>
         <td>
-          <input class="search-box" style="min-width:72px" data-incident-sla="${esc(i.incident_key)}" value="${esc(i.sla_hours ?? 24)}" placeholder="24" />
+          <input class="search-box incident-input incident-input-sla" data-incident-sla="${esc(i.incident_key)}" value="${esc(i.sla_hours ?? 24)}" placeholder="24" />
         </td>
         <td>
-          <input class="search-box" style="min-width:180px" data-incident-due="${esc(i.incident_key)}" value="${esc(i.due_at || '')}" placeholder="2026-04-03T12:00:00Z" />
+          <input class="search-box incident-input incident-input-due" data-incident-due="${esc(i.incident_key)}" value="${esc(i.due_at || '')}" placeholder="2026-04-03T12:00:00Z" />
         </td>
         <td>
-          <input class="search-box" style="min-width:160px" data-incident-reopen="${esc(i.incident_key)}" value="${esc(i.reopen_reason || '')}" placeholder="reason if reopening" />
+          <input class="search-box incident-input incident-input-reopen" data-incident-reopen="${esc(i.incident_key)}" value="${esc(i.reopen_reason || '')}" placeholder="reason if reopening" />
         </td>
         <td>
-          <input class="search-box" style="min-width:180px" data-incident-notes="${esc(i.incident_key)}" value="${esc(i.notes || '')}" placeholder="notes" />
+          <input class="search-box incident-input incident-input-notes" data-incident-notes="${esc(i.incident_key)}" value="${esc(i.notes || '')}" placeholder="notes" />
         </td>
         <td class="text-muted text-sm">${fmt_dt(i.last_seen)}</td>
-        <td style="white-space:nowrap">
+        <td class="incident-actions-cell">
           <button class="btn btn-ghost btn-mini" data-ai-item="${esc(JSON.stringify(i))}" data-ai-type="incident">AI</button>
           <button class="btn btn-ghost btn-mini" data-incident-action="ack" data-incident-key="${esc(i.incident_key)}">Ack</button>
           <button class="btn btn-ghost btn-mini" data-incident-action="open" data-incident-key="${esc(i.incident_key)}">Open</button>
@@ -1172,6 +1210,14 @@
     renderPacketFlows();
     renderPacketConversations();
     toast('Packet table cleared (view only)', 'info');
+  }
+
+  function togglePacketAnalyticsCard(cardId, buttonId) {
+    const card = document.getElementById(cardId);
+    const btn = document.getElementById(buttonId);
+    if (!card || !btn) return;
+    const expanded = card.classList.toggle('is-expanded');
+    btn.textContent = expanded ? 'Collapse' : 'Expand';
   }
 
   async function decodeSelectedPacketFrame() {
@@ -1545,7 +1591,9 @@
       const card = document.getElementById(cardId);
       card?.classList.add('flicker');
       setTimeout(() => card?.classList.remove('flicker'), 500);
-      toast(`[${a.severity.toUpperCase()}] ${a.message}`, a.severity === 'high' ? 'err' : 'info');
+      if (shouldShowHighAlertPopup(a)) {
+        toast(`[${a.severity.toUpperCase()}] ${a.message}`, 'err');
+      }
       if (document.getElementById('view-alerts')?.classList.contains('active')) renderAlerts();
     };
     es.onopen  = () => { setDot('ok', 'Engine running'); };
@@ -1555,6 +1603,14 @@
   function setDot(cls, label) {
     document.getElementById('status-dot').className = `dot dot-${cls}`;
     document.getElementById('status-label').textContent = label;
+  }
+
+  function shouldShowHighAlertPopup(alert) {
+    const alertsViewActive = !!document.getElementById('view-alerts')?.classList.contains('active');
+    if (!alertsViewActive) return false;
+    const severityFilter = String(document.getElementById('alert-severity-filter')?.value || '').toLowerCase();
+    if (severityFilter !== 'high') return false;
+    return String(alert?.severity || '').toLowerCase() === 'high';
   }
 
   function fmtAgentLabel(agentType) {
@@ -1662,6 +1718,7 @@
   /* ═══════════════════════ Init ═════════════════════════════ */
   function init() {
     initNav();
+    setIncidentTicketTab('open');
 
     // Initial data
     fetchStats();
@@ -1707,12 +1764,29 @@
     document.getElementById('packets-clear-btn')?.addEventListener('click', clearPacketsView);
     document.getElementById('packets-export-btn')?.addEventListener('click', exportPackets);
     document.getElementById('packet-decode-btn')?.addEventListener('click', decodeSelectedPacketFrame);
+    document.getElementById('packet-flows-toggle-btn')?.addEventListener('click', () => {
+      togglePacketAnalyticsCard('packet-flows-card', 'packet-flows-toggle-btn');
+    });
+    document.getElementById('packet-conversations-toggle-btn')?.addEventListener('click', () => {
+      togglePacketAnalyticsCard('packet-conversations-card', 'packet-conversations-toggle-btn');
+    });
 
     // Alert filters
     document.getElementById('alert-severity-filter')?.addEventListener('change', renderAlerts);
     document.getElementById('alert-search')?.addEventListener('input', renderAlerts);
-    document.getElementById('incident-status-filter')?.addEventListener('change', renderIncidents);
+    document.getElementById('incident-status-filter')?.addEventListener('change', () => {
+      const status = String(document.getElementById('incident-status-filter')?.value || '').toLowerCase();
+      if (status === 'closed') {
+        setIncidentTicketTab('closed');
+      } else if (S.incidentTicketTab === 'closed') {
+        setIncidentTicketTab('open');
+      } else {
+        renderIncidents();
+      }
+    });
     document.getElementById('incident-search')?.addEventListener('input', renderIncidents);
+    document.getElementById('incident-tab-open')?.addEventListener('click', () => setIncidentTicketTab('open'));
+    document.getElementById('incident-tab-closed')?.addEventListener('click', () => setIncidentTicketTab('closed'));
     document.getElementById('traffic-status-filter')?.addEventListener('change', renderConnections);
     document.getElementById('traffic-search')?.addEventListener('input', renderConnections);
 
