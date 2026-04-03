@@ -28,6 +28,7 @@ A self-contained Python network security monitor with a live web dashboard, AI-p
 
 - Python 3.10 or newer
 - Windows, macOS, or Linux
+- Wireshark (for packet inspection and TShark decode workflows)
 
 ### 2 · Install
 
@@ -53,6 +54,52 @@ siem --serve
 # Whole-network sensor mode (requires Npcap + mirrored/bridged NIC)
 python run.py --capture-mode pcap
 ```
+
+## Quick Deploy (Release)
+
+Use this flow for a fresh machine from GitHub to running dashboard in a few minutes.
+
+1. Clone and enter project:
+
+```bash
+git clone https://github.com/andrewc48/Siem-Log.git
+cd Siem-Log
+```
+
+2. Create virtual environment and install:
+
+```bash
+python -m venv .venv
+
+# Windows PowerShell
+.\.venv\Scripts\Activate.ps1
+
+pip install -e .
+```
+
+3. Start dashboard:
+
+```bash
+python run.py
+```
+
+4. Open browser:
+
+```text
+http://localhost:8080
+```
+
+5. Optional sensor mode (whole-network packet visibility):
+  - install Npcap
+  - configure mirrored/SPAN traffic to this host
+
+```bash
+python run.py --capture-mode pcap --host 0.0.0.0 --port 8080
+```
+
+6. Optional AI setup:
+  - copy `.env.example` to `.env`
+  - add your OpenAI key, or paste it in Settings and save
 
 ## Run Without VS Code (One Click)
 
