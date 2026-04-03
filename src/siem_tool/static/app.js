@@ -1117,10 +1117,29 @@
   async function fetchPackets() {
     if (S.packetsPaused) return;
     try {
-      S.packets = await apiFetch('GET', '/api/packets?limit=500');
+      const incoming = await apiFetch('GET', '/api/packets?limit=500');
+      const packetRows = Array.isArray(incoming) ? incoming : [];
+      const merged = new Map();
+      [...S.packets, ...packetRows].forEach((p) => {
+        merged.set(packetIdentity(p), p);
+      });
+      S.packets = Array.from(merged.values()).slice(-2000);
       renderPackets();
       fetchPacketAnalytics();
     } catch (_) {}
+  }
+
+  function packetIdentity(p) {
+    if (!p || typeof p !== 'object') return '';
+    return [
+      String(p.frame_number ?? ''),
+      String(p.timestamp ?? ''),
+      String(p.src_ip ?? ''),
+      String(p.src_port ?? ''),
+      String(p.dst_ip ?? ''),
+      String(p.dst_port ?? ''),
+      String(p.protocol ?? ''),
+    ].join('|');
   }
 
   async function fetchPacketAnalytics() {
@@ -1230,8 +1249,8 @@
       renderPacketDetails(null);
       return;
     }
-    tbody.innerHTML = rows.map((p, idx) => {
-      const key = `${p.timestamp}|${p.src_ip}|${p.src_port}|${p.dst_ip}|${p.dst_port}|${idx}`;
+    tbody.innerHTML = rows.map((p) => {
+      const key = packetIdentity(p);
       const selected = key === S.selectedPacketKey ? ' packet-row-selected' : '';
       return `
       <tr class="${selected}" data-packet-key="${esc(key)}">
@@ -1247,21 +1266,27 @@
       </tr>`;
     }).join('');
 
-    tbody.querySelectorAll('tr').forEach((tr, i) => {
+    tbody.querySelectorAll('tr[data-packet-key]').forEach((tr) => {
       tr.addEventListener('click', () => {
-        const p = rows[i];
-        S.selectedPacketKey = `${p.timestamp}|${p.src_ip}|${p.src_port}|${p.dst_ip}|${p.dst_port}|${i}`;
+        const key = tr.getAttribute('data-packet-key') || '';
+        const p = rows.find((row) => packetIdentity(row) === key);
+        if (!p) return;
+        S.selectedPacketKey = key;
         S.selectedPacket = p;
         renderPackets();
         renderPacketDetails(p);
       });
     });
 
-    if (!rows.some((p, i) => `${p.timestamp}|${p.src_ip}|${p.src_port}|${p.dst_ip}|${p.dst_port}|${i}` === S.selectedPacketKey)) {
+    if (!rows.some((p) => packetIdentity(p) === S.selectedPacketKey)) {
       S.selectedPacketKey = '';
       S.selectedPacket = rows[0] || null;
       renderPacketDetails(rows[0]);
+      return;
     }
+
+    const selected = rows.find((p) => packetIdentity(p) === S.selectedPacketKey) || S.selectedPacket;
+    renderPacketDetails(selected || rows[0] || null);
   }
 
   function renderPacketDetails(p) {

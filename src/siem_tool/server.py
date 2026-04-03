@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import shutil
 import subprocess
 import threading
 from collections import deque
@@ -753,7 +754,33 @@ def _sensor_checks(
 
 
 def _get_tshark_cmd() -> str:
-    return os.environ.get("TSHARK_PATH", "tshark").strip() or "tshark"
+    raw = os.environ.get("TSHARK_PATH", "").strip()
+
+    # Support users setting TSHARK_PATH with surrounding quotes, e.g.
+    # "C:\\Program Files\\Wireshark\\tshark.exe".
+    if len(raw) >= 2 and raw[0] == raw[-1] and raw[0] in ('"', "'"):
+        raw = raw[1:-1].strip()
+
+    if raw:
+        if Path(raw).is_file():
+            return raw
+        resolved = shutil.which(raw)
+        if resolved:
+            return resolved
+
+    resolved_default = shutil.which("tshark")
+    if resolved_default:
+        return resolved_default
+
+    # Common Wireshark install paths on Windows when PATH wasn't updated.
+    for candidate in (
+        r"C:\Program Files\Wireshark\tshark.exe",
+        r"C:\Program Files (x86)\Wireshark\tshark.exe",
+    ):
+        if Path(candidate).is_file():
+            return candidate
+
+    return raw or "tshark"
 
 
 def _tshark_status(pcap_file: Path | None = None) -> Dict[str, Any]:
