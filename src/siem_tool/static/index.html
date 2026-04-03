@@ -1,0 +1,722 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SIEM Dashboard</title>
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+  <div class="layout">
+
+    <!-- ── Sidebar ─────────────────────────────────────────── -->
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-icon">⬡</span>
+        <div class="brand-copy">
+          <div class="brand-text">Network Monitor</div>
+          <div class="brand-subtext">Developed By: Andrew Chambers</div>
+        </div>
+      </div>
+      <nav>
+        <a class="nav-link active" data-view="overview" href="#">Overview</a>
+        <a class="nav-link" data-view="devices"  href="#">Devices</a>
+        <a class="nav-link" data-view="bluetooth" href="#">Bluetooth</a>
+        <a class="nav-link" data-view="alerts"   href="#">Alerts</a>
+        <a class="nav-link" data-view="incidents" href="#">Incidents</a>
+        <a class="nav-link" data-view="risk" href="#">Host Risk</a>
+        <a class="nav-link" data-view="chains" href="#">Attack Chains</a>
+        <a class="nav-link" data-view="health" href="#">Health</a>
+        <a class="nav-link" data-view="firewall" href="#">Firewall</a>
+        <a class="nav-link" data-view="traffic"  href="#">Traffic</a>
+        <a class="nav-link" data-view="packets"  href="#">Packets</a>
+        <a class="nav-link" data-view="setup" href="#">Setup</a>
+        <a class="nav-link" data-view="settings" href="#">Settings &amp; Logs</a>
+        <a class="nav-link" data-view="ai"       href="#">AI Analyzer</a>
+      </nav>
+      <div class="sidebar-footer">
+        <span id="status-dot" class="dot dot-ok"></span>
+        <span id="status-label">Engine running</span>
+      </div>
+    </aside>
+
+    <!-- ── Main ────────────────────────────────────────────── -->
+    <main class="main">
+
+      <!-- Header -->
+      <header class="topbar">
+        <h1 class="page-title" id="page-title">Overview</h1>
+        <div class="topbar-right">
+          <span class="badge badge-live" id="live-badge">● LIVE</span>
+          <span class="last-updated" id="last-updated">—</span>
+        </div>
+      </header>
+
+      <!-- ── VIEW: Overview ──────────────────────────────── -->
+      <section class="view active" id="view-overview">
+        <div class="stat-grid">
+          <div class="stat-card">
+            <div class="stat-label">Devices Detected</div>
+            <div class="stat-value" id="stat-devices">—</div>
+          </div>
+          <div class="stat-card danger" id="stat-card-high">
+            <div class="stat-label">High Alerts</div>
+            <div class="stat-value" id="stat-high">—</div>
+          </div>
+          <div class="stat-card warn" id="stat-card-med">
+            <div class="stat-label">Medium Alerts</div>
+            <div class="stat-value" id="stat-med">—</div>
+          </div>
+          <div class="stat-card info">
+            <div class="stat-label" id="stat-bw-label">Network Throughput</div>
+            <div class="stat-value" id="stat-bw">—</div>
+          </div>
+          <div class="stat-card" id="stat-card-health">
+            <div class="stat-label">Network Health</div>
+            <div class="stat-value" id="stat-health">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Bluetooth Events (24h)</div>
+            <div class="stat-value" id="stat-bt">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Captured Throughput</div>
+            <div class="stat-value" id="stat-bw-captured">—</div>
+          </div>
+          <div class="stat-card">
+            <div class="stat-label">Packet Rate</div>
+            <div class="stat-value" id="stat-pps">—</div>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="card">
+            <div class="card-header">
+              <span>Recent Alerts</span>
+              <a class="card-link" data-view="alerts" href="#">View all</a>
+            </div>
+            <ul class="feed" id="overview-alerts-feed">
+              <li class="feed-empty">No alerts yet</li>
+            </ul>
+          </div>
+          <div class="card">
+            <div class="card-header">
+              <span>Live Bandwidth per Interface</span>
+            </div>
+            <ul class="bw-list" id="bw-list"></ul>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span>Recent Bluetooth Activity</span>
+            <a class="card-link" data-view="bluetooth" href="#">View Bluetooth</a>
+          </div>
+          <ul class="feed" id="overview-bt-feed">
+            <li class="feed-empty">No Bluetooth events yet</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span>Recent Firewall Blocks</span>
+            <a class="card-link" data-view="firewall" href="#">View Firewall</a>
+          </div>
+          <ul class="feed" id="overview-firewall-feed">
+            <li class="feed-empty">No firewall blocks yet</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span>Correlated Incidents (Phase 4)</span>
+            <a class="card-link" data-view="incidents" href="#">View Incidents</a>
+          </div>
+          <ul class="feed" id="overview-incidents-feed">
+            <li class="feed-empty">No active correlated incidents</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span>Sensor Status</span></div>
+          <ul class="feed" id="overview-system-feed">
+            <li class="feed-empty">Loading status...</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span>Network Health Probes</span>
+            <a class="card-link" data-view="health" href="#">View all</a>
+          </div>
+          <ul class="feed" id="overview-health-feed">
+            <li class="feed-empty">Collecting probe data...</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Setup ─────────────────────────── -->
+      <section class="view" id="view-setup">
+        <div class="card">
+          <div class="card-header">
+            <span>First-Run Setup Wizard</span>
+            <div class="settings-actions">
+              <button class="btn btn-primary" id="setup-refresh-btn">Run Diagnostics</button>
+            </div>
+          </div>
+          <div class="settings-body">
+            <div id="setup-ready-status" class="settings-hint">Running checks...</div>
+            <ul class="feed" id="setup-steps-feed">
+              <li class="feed-empty">No setup checks yet</li>
+            </ul>
+            <div>
+              <div class="settings-label">Detected Blockers</div>
+              <ul class="feed" id="setup-blockers-feed">
+                <li class="feed-empty">No blockers</li>
+              </ul>
+            </div>
+            <div>
+              <div class="settings-label">Auto-Fix Suggestions</div>
+              <ul class="feed" id="setup-suggestions-feed">
+                <li class="feed-empty">No suggestions</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Incidents ────────────────────────────── -->
+      <section class="view" id="view-incidents">
+        <div class="card">
+          <div class="card-header"><span>Saved Views</span></div>
+          <div class="settings-body">
+            <div class="settings-row">
+              <select class="filter-select" id="saved-view-scope">
+                <option value="alerts">Alerts</option>
+                <option value="incidents">Incidents</option>
+                <option value="traffic">Traffic</option>
+              </select>
+              <select class="filter-select" id="saved-view-select" style="min-width:220px">
+                <option value="">No saved views</option>
+              </select>
+              <input class="search-box" id="saved-view-name" type="text" placeholder="View name..." />
+            </div>
+            <div class="settings-actions">
+              <button class="btn btn-primary" id="saved-view-save-btn">Save Current Filters</button>
+              <button class="btn btn-ghost" id="saved-view-apply-btn">Apply Selected</button>
+              <button class="btn btn-ghost" id="saved-view-delete-btn">Delete Selected</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span>Correlated Security Incidents</span>
+            <div class="card-actions">
+              <select class="filter-select" id="incident-status-filter">
+                <option value="">All statuses</option>
+                <option value="open">Open</option>
+                <option value="acknowledged">Acknowledged</option>
+                <option value="closed">Closed</option>
+              </select>
+              <input class="search-box" id="incident-search" type="text" placeholder="Filter actor/family/rules..." />
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="incidents-table">
+              <thead>
+                <tr>
+                  <th>Severity</th>
+                  <th>Status</th>
+                  <th>Family</th>
+                  <th>Actor</th>
+                  <th>Owner</th>
+                  <th>Alerts</th>
+                  <th>Score</th>
+                  <th>Rules</th>
+                  <th>SLA (h)</th>
+                  <th>Due At (ISO)</th>
+                  <th>Reopen Reason</th>
+                  <th>Notes</th>
+                  <th>Last Seen</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="incidents-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span id="incident-timeline-title">Incident Timeline</span></div>
+          <ul class="feed" id="incident-timeline-feed">
+            <li class="feed-empty">Select Timeline on an incident row to view status history.</li>
+          </ul>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Host Risk ─────────────────────────────── -->
+      <section class="view" id="view-risk">
+        <div class="card">
+          <div class="card-header">
+            <span>Risk-Scored Hosts</span>
+            <div class="settings-actions">
+              <button class="btn btn-ghost" id="risk-refresh-btn">Refresh</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="risk-table">
+              <thead>
+                <tr>
+                  <th>Host</th>
+                  <th>Risk Score</th>
+                  <th>Alerts</th>
+                  <th>High</th>
+                  <th>Medium</th>
+                  <th>Firewall Blocks</th>
+                  <th>Health Penalty</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="risk-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Attack Chains ─────────────────────────── -->
+      <section class="view" id="view-chains">
+        <div class="card">
+          <div class="card-header">
+            <span>Correlated Attack Chains</span>
+            <div class="settings-actions">
+              <button class="btn btn-ghost" id="chains-refresh-btn">Refresh</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="chains-table">
+              <thead>
+                <tr>
+                  <th>Actor</th>
+                  <th>Stages</th>
+                  <th>Alerts</th>
+                  <th>Confidence</th>
+                  <th>First Seen</th>
+                  <th>Last Seen</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody id="chains-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Health ────────────────────────────────── -->
+      <section class="view" id="view-health">
+        <div class="card">
+          <div class="card-header"><span>Network Health Summary</span></div>
+          <ul class="feed" id="health-summary-feed">
+            <li class="feed-empty">Collecting probe data...</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span>Device Availability Probes</span></div>
+          <div class="table-wrap">
+            <table class="data-table" id="health-probes-table">
+              <thead>
+                <tr>
+                  <th>Device Name</th>
+                  <th>MAC Address</th>
+                  <th>IP Address</th>
+                  <th>Status</th>
+                  <th>Last RTT</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody id="health-probes-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Devices ───────────────────────────────── -->
+      <section class="view" id="view-devices">
+        <div class="card">
+          <div class="card-header">
+            <span>Network Devices</span>
+            <div class="card-actions">
+              <input class="search-box" id="device-search" type="text" placeholder="Filter…" />
+              <button class="btn btn-primary" id="btn-scan">⟳ Scan Subnet</button>
+            </div>
+          </div>
+          <div class="scan-status hidden" id="scan-status">Scanning subnets…</div>
+          <div class="table-wrap">
+            <table class="data-table" id="device-table">
+              <thead>
+                <tr>
+                  <th>IP Address</th>
+                  <th>Alias / Name</th>
+                  <th>MAC Address</th>
+                  <th>Hostname</th>
+                  <th>Last Seen</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="device-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Bluetooth ─────────────────────────────── -->
+      <section class="view" id="view-bluetooth">
+        <div class="card">
+          <div class="card-header"><span>Bluetooth Events</span></div>
+          <div class="table-wrap">
+            <table class="data-table" id="bluetooth-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Name</th>
+                  <th>Address</th>
+                  <th>Connected</th>
+                  <th>Type</th>
+                  <th>Source</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="bluetooth-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Alerts ────────────────────────────────── -->
+      <section class="view" id="view-alerts">
+        <div class="card">
+          <div class="card-header">
+            <span>Alert History</span>
+            <div class="card-actions">
+              <select class="filter-select" id="alert-severity-filter">
+                <option value="">All severities</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+              </select>
+              <input class="search-box" id="alert-search" type="text" placeholder="Filter…" />
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="alerts-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Severity</th>
+                  <th>Rule</th>
+                  <th>Message</th>
+                  <th>Interface</th>
+                  <th>Observed</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="alerts-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Firewall ─────────────────────────────── -->
+      <section class="view" id="view-firewall">
+        <div class="card">
+          <div class="card-header">
+            <span>Windows Firewall Blocked Traffic</span>
+            <span id="firewall-log-status" class="status-muted">Checking firewall logging...</span>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="firewall-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Action</th>
+                  <th>Protocol</th>
+                  <th>Source</th>
+                  <th>Destination</th>
+                  <th>Direction</th>
+                  <th>Interface</th>
+                </tr>
+              </thead>
+              <tbody id="firewall-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Traffic ───────────────────────────────── -->
+      <section class="view" id="view-traffic">
+        <div class="card">
+          <div class="card-header">
+            <span>Active Connections</span>
+            <div class="card-actions">
+              <select class="filter-select" id="traffic-status-filter">
+                <option value="">All states</option>
+                <option value="established">Established</option>
+                <option value="non-established">Non-established</option>
+              </select>
+              <input class="search-box" id="traffic-search" type="text" placeholder="Filter process/ip/port/status..." />
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="traffic-table">
+              <thead>
+                <tr>
+                  <th>Process</th>
+                  <th>Local</th>
+                  <th>Remote</th>
+                  <th>Status</th>
+                  <th>Family</th>
+                  <th>PID</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody id="traffic-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Packets ───────────────────────────────── -->
+      <section class="view" id="view-packets">
+        <div class="card">
+          <div class="card-header">
+            <span>Live Packet Stream (Wireshark-style metadata)</span>
+            <div class="card-actions">
+              <button class="btn btn-ghost" id="packets-pause-btn">Pause</button>
+              <button class="btn btn-ghost" id="packets-clear-btn">Clear View</button>
+              <button class="btn btn-ghost" id="packets-export-btn">Export JSON</button>
+              <input class="search-box" id="packets-search" type="text" placeholder="Filter ip/port/protocol..." />
+              <select class="filter-select" id="packets-protocol-filter">
+                <option value="">All protocols</option>
+                <option value="TCP">TCP</option>
+                <option value="UDP">UDP</option>
+              </select>
+              <select class="filter-select" id="packets-direction-filter">
+                <option value="">All directions</option>
+                <option value="inbound">Inbound</option>
+                <option value="outbound">Outbound</option>
+                <option value="unknown">Unknown</option>
+              </select>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="packets-table">
+              <thead>
+                <tr>
+                  <th>Time</th>
+                  <th>Direction</th>
+                  <th>Protocol</th>
+                  <th>App</th>
+                  <th>Source</th>
+                  <th>Destination</th>
+                  <th>Flags</th>
+                  <th>Length</th>
+                  <th>Interface</th>
+                </tr>
+              </thead>
+              <tbody id="packets-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span>Selected Packet Details</span></div>
+          <div class="settings-body">
+            <div id="packet-detail-meta" class="settings-hint">Click a packet row to inspect details.</div>
+            <div class="settings-actions" style="margin:8px 0">
+              <button class="btn btn-ghost" id="packet-decode-btn">Decode Frame (TShark)</button>
+            </div>
+            <pre id="packet-detail-payload" class="packet-payload">No payload preview available.</pre>
+            <pre id="packet-detail-decode" class="packet-payload">No decode requested.</pre>
+          </div>
+        </div>
+
+        <div class="two-col">
+          <div class="card">
+            <div class="card-header"><span>Top Flows</span></div>
+            <div class="table-wrap">
+              <table class="data-table" id="packet-flows-table">
+                <thead>
+                  <tr>
+                    <th>Flow</th>
+                    <th>Packets</th>
+                    <th>Bytes</th>
+                    <th>App</th>
+                  </tr>
+                </thead>
+                <tbody id="packet-flows-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="card">
+            <div class="card-header"><span>Top Conversations</span></div>
+            <div class="table-wrap">
+              <table class="data-table" id="packet-conversations-table">
+                <thead>
+                  <tr>
+                    <th>Conversation</th>
+                    <th>Packets</th>
+                    <th>Bytes</th>
+                    <th>App</th>
+                  </tr>
+                </thead>
+                <tbody id="packet-conversations-tbody"></tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Settings ─────────────────────────── -->
+      <section class="view" id="view-settings">
+        <!-- Log Retention -->
+        <div class="card">
+          <div class="card-header"><span>Log Retention</span></div>
+          <div class="settings-body">
+            <div class="settings-group">
+              <label class="settings-label" for="set-events-hours">Network &amp; connection logs</label>
+              <div class="settings-row">
+                <input class="settings-input" type="number" id="set-events-hours" min="1" max="8760" step="1" value="24" />
+                <span class="settings-unit">hours &nbsp;(24 = 1 day)</span>
+              </div>
+              <span class="settings-hint">Events and connections older than this are pruned automatically by the background pruner.</span>
+            </div>
+            <div class="settings-group">
+              <label class="settings-label" for="set-alerts-hours">Alert logs</label>
+              <div class="settings-row">
+                <input class="settings-input" type="number" id="set-alerts-hours" min="1" max="8760" step="1" value="72" />
+                <span class="settings-unit">hours &nbsp;(72 = 3 days)</span>
+              </div>
+              <span class="settings-hint">Alerts older than this are automatically removed. Increase to keep a longer history.</span>
+            </div>
+            <div class="settings-group">
+              <label class="settings-label" for="set-archive-days">Archive retention</label>
+              <div class="settings-row">
+                <input class="settings-input" type="number" id="set-archive-days" min="1" max="3650" step="1" value="90" />
+                <span class="settings-unit">days</span>
+              </div>
+              <span class="settings-hint">Archived logs older than this are automatically deleted during prune cycles.</span>
+            </div>
+            <div class="settings-actions">
+              <button class="btn btn-primary" id="settings-save-btn">Save Settings</button>
+              <button class="btn btn-ghost"   id="settings-prune-btn">Archive Old Logs Now</button>
+              <button class="btn btn-ghost"   id="settings-clear-archive-btn">🗑 Clear Archived Logs</button>
+            </div>
+          </div>
+        </div>
+
+        <!-- AI Key -->
+        <div class="card">
+          <div class="card-header"><span>AI Analyzer — OpenAI API Key</span></div>
+          <div class="settings-body">
+            <div class="settings-group">
+              <label class="settings-label">API Key</label>
+              <div class="settings-row">
+                <input class="settings-input" type="password" id="set-ai-key"
+                  placeholder="sk-..." autocomplete="off" spellcheck="false" style="flex:1" />
+              </div>
+              <div style="margin-top:6px">
+                <span id="ai-key-status" class="status-muted">Checking…</span>
+              </div>
+              <span class="settings-hint" style="margin-top:8px;display:block">
+                Stored only in the <code>.env</code> file on this machine — never logged or sent anywhere except OpenAI.
+                Obtain a key at <strong>platform.openai.com/api-keys</strong>.
+                Leave blank to keep the existing key unchanged.
+              </span>
+            </div>
+            <div class="settings-actions">
+              <button class="btn btn-primary" id="settings-ai-save-btn">Save API Key</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header"><span>Detection Noise Controls</span></div>
+          <div class="settings-body">
+            <div class="settings-group">
+              <label class="settings-label" for="detector-controls-json">Rule Controls JSON</label>
+              <textarea class="settings-input" id="detector-controls-json" rows="10" style="width:100%;min-height:220px;font-family:Consolas,monospace"></textarea>
+              <span class="settings-hint">Edit per-rule enable/mute/threshold and suppression rules. Use carefully.</span>
+            </div>
+            <div class="settings-actions">
+              <button class="btn btn-ghost" id="detector-controls-load-btn">Load Controls</button>
+              <button class="btn btn-primary" id="detector-controls-save-btn">Save Controls</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- ── VIEW: AI Analyzer ──────────────────────── -->
+      <section class="view" id="view-ai">
+        <div class="ai-layout">
+
+          <!-- Context info bar -->
+          <div class="ai-context-bar hidden" id="ai-context-info"></div>
+
+          <!-- Quick-analyze buttons -->
+          <div class="ai-quick-bar">
+            <button class="btn btn-ghost" id="ai-quick-alerts">⚡ Analyze Recent Alerts</button>
+            <button class="btn btn-ghost" id="ai-quick-traffic">🔍 Analyze Traffic</button>
+            <span class="ai-agent-badge" id="ai-agent-badge">Agent: SOC Copilot</span>
+            <button class="btn btn-ghost" id="ai-clear-btn" style="margin-left:auto">🗑 Clear Chat</button>
+          </div>
+
+          <!-- Chat window -->
+          <div class="ai-chat-wrap card">
+            <div class="ai-chat" id="ai-chat">
+              <div class="ai-chat-empty" id="ai-chat-empty">
+                <div class="ai-empty-icon">⬡</div>
+                <div><strong>SIEM AI Analyzer</strong></div>
+                <p>
+                  Ask a question about your network activity, or click a
+                  quick-analyze button above. Use the 🤖 button on any alert,
+                  connection, incident, or device row to load it as context first.
+                  Each mode uses a specialized agent with structured output; responses include confidence-level reasoning and concrete next steps.
+                </p>
+              </div>
+            </div>
+            <div class="ai-input-bar">
+              <textarea class="ai-input" id="ai-input" rows="2"
+                placeholder="Ask about alerts, traffic patterns, devices… (Enter to send, Shift+Enter for newline)"></textarea>
+              <button class="btn btn-primary ai-send-btn" id="ai-send-btn">Send ↑</button>
+            </div>
+          </div>
+
+        </div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- ── Alias modal ──────────────────────────────────────── -->
+  <div class="modal-overlay hidden" id="alias-modal">
+    <div class="modal">
+      <div class="modal-header">
+        <span>Name Device</span>
+        <button class="modal-close" id="modal-close">✕</button>
+      </div>
+      <p class="modal-ip" id="modal-ip-label"></p>
+      <input class="modal-input" type="text" id="modal-alias-input" placeholder="e.g. Office-Laptop" maxlength="64" />
+      <div class="modal-actions">
+        <button class="btn btn-ghost" id="modal-clear">Clear Name</button>
+        <button class="btn btn-primary" id="modal-save">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Toast container ──────────────────────────────────── -->
+  <div id="toast-container"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

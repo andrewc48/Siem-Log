@@ -1,0 +1,28 @@
+[project]
+name = "simple-siem"
+version = "0.1.0"
+description = "A simple Python SIEM starter focused on network telemetry ingestion and basic anomaly detection."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "psutil>=5.9",
+    "fastapi>=0.110",
+    "uvicorn>=0.29",
+    "python-dotenv>=1.0",
+    "openai>=1.0",
+    "scapy>=2.5",
+]
+
+
+[project.scripts]
+siem = "siem_tool.cli:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

@@ -1,0 +1,41 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+logs/
+*.egg-info/
+.dist/
+build/
+
+# Environment secrets
+.env
+.env.*
+!.env.example
+
+# IDE/editor local settings
+.vscode/
+.idea/
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# OS cruft
+.DS_Store
+Thumbs.db
+
+# Runtime artifacts and captures
+*.pcap
+*.pcapng
+*.cap
+*.log
+
+# Local packaging/build outputs
+dist/
+*.spec
