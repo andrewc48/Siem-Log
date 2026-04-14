@@ -69,6 +69,12 @@ class SIEMConfig:
     network_health_probe_interval_seconds: int = 8
     network_health_timeout_ms: int = 1500
     network_health_targets: Tuple[str, ...] = ()
+    agent_api_enabled: bool = True
+    agent_enrollment_token: str = "lab-enroll"
+    agent_discovery_enabled: bool = True
+    agent_discovery_port: int = 55110
+    agent_advertise_url: str = ""
+    agent_heartbeat_timeout_seconds: int = 180
 
 
 def load_config(config_path: str | None) -> SIEMConfig:
@@ -141,4 +147,10 @@ def load_config(config_path: str | None) -> SIEMConfig:
         network_health_probe_interval_seconds=int(raw.get("network_health_probe_interval_seconds", 8)),
         network_health_timeout_ms=int(raw.get("network_health_timeout_ms", 1500)),
         network_health_targets=network_health_targets,
+        agent_api_enabled=bool(raw.get("agent_api_enabled", True)),
+        agent_enrollment_token=str(raw.get("agent_enrollment_token", "lab-enroll") or "lab-enroll"),
+        agent_discovery_enabled=bool(raw.get("agent_discovery_enabled", True)),
+        agent_discovery_port=int(raw.get("agent_discovery_port", 55110)),
+        agent_advertise_url=str(raw.get("agent_advertise_url", "") or ""),
+        agent_heartbeat_timeout_seconds=int(raw.get("agent_heartbeat_timeout_seconds", 180)),
     )

@@ -136,7 +136,7 @@ def main() -> None:
             print("uvicorn not found. Run: pip install uvicorn")
             return
         from .server import app, start_background_engine
-        start_background_engine(config)
+        start_background_engine(config, server_host=args.host, server_port=args.port, server_scheme="http")
         url = f"http://{'localhost' if args.host in ('0.0.0.0', '127.0.0.1') else args.host}:{args.port}"
         print(f"\n  [SIEM] Dashboard running at {url}\n")
         uvicorn.run(app, host=args.host, port=args.port, log_level="warning")

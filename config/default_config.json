@@ -55,5 +55,11 @@
   "network_health_enabled": true,
   "network_health_probe_interval_seconds": 8,
   "network_health_timeout_ms": 1500,
-  "network_health_targets": ["192.168.1.73"]
+  "network_health_targets": ["192.168.1.73"],
+  "agent_api_enabled": true,
+  "agent_enrollment_token": "lab-enroll",
+  "agent_discovery_enabled": true,
+  "agent_discovery_port": 55110,
+  "agent_advertise_url": "",
+  "agent_heartbeat_timeout_seconds": 180
 }

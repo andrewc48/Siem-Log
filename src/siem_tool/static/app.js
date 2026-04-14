@@ -7,6 +7,7 @@
   /* ═══════════════════════ State ═══════════════════════════ */
   const S = {
     devices: [], bluetooth: [], alerts: [], connections: [], packets: [], events: [],
+    agents: [], agentEvents: [],
     packetFlows: [], packetConversations: [],
     incidents: [],
     firewallBlocks: [],
@@ -112,7 +113,7 @@
     if (v) v.classList.add('active');
     if (n) n.classList.add('active');
     const TITLES = {
-      overview: 'Overview', devices: 'Network Devices', bluetooth: 'Bluetooth Devices', alerts: 'Alerts',
+      overview: 'Overview', devices: 'Network Devices', agents: 'Endpoint Agents', bluetooth: 'Bluetooth Devices', alerts: 'Alerts',
       incidents: 'Correlated Incidents',
       risk: 'Host Risk',
       chains: 'Attack Chains',
@@ -122,6 +123,7 @@
     };
     document.getElementById('page-title').textContent = TITLES[name] ?? name;
     if (name === 'devices')  fetchDevices();
+    if (name === 'agents') { fetchAgents(); fetchAgentEvents(); }
     if (name === 'bluetooth') fetchBluetooth();
     if (name === 'alerts')   fetchAlerts();
     if (name === 'incidents') fetchIncidents();
@@ -174,6 +176,8 @@
     try {
       const s = await apiFetch('GET', '/api/stats');
       document.getElementById('stat-devices').textContent = s.device_count;
+      const agentStat = document.getElementById('stat-agents');
+      if (agentStat) agentStat.textContent = `${s.agent_count_online || 0}/${s.agent_count || 0}`;
       document.getElementById('stat-high').textContent    = s.alert_count_high;
       document.getElementById('stat-med').textContent     = s.alert_count_medium;
       const bw = (s.network_bandwidth_bps ?? s.recent_bandwidth_bps ?? 0);
@@ -455,6 +459,143 @@
   /* ═══════════════════════ Devices ══════════════════════════ */
   async function fetchDevices() {
     try { S.devices = await apiFetch('GET', '/api/devices'); renderDevices(); } catch (_) {}
+  }
+
+  async function fetchAgents() {
+    try {
+      S.agents = await apiFetch('GET', '/api/agents');
+      renderAgents();
+    } catch (_) {}
+  }
+
+  async function fetchAgentEvents() {
+    try {
+      S.agentEvents = await apiFetch('GET', '/api/agents/events?limit=500');
+      renderAgentEvents();
+      renderOverviewAgentsFeed();
+    } catch (_) {}
+  }
+
+  function formatAgentEventSource(ev) {
+    const type = String(ev.event_type || 'event');
+    if (type === 'windows_event') {
+      return `${ev.channel || 'Windows'} · ${ev.event_id || '—'}`;
+    }
+    if (type === 'connection_snapshot') {
+      return `${ev.local_ip || '—'}:${ev.local_port || 0} → ${ev.remote_ip || '—'}:${ev.remote_port || 0}`;
+    }
+    if (type === 'host_identity') {
+      return `${ev.os || 'host'} · ${((ev.local_ips || []).join(', ')) || 'no IPs'}`;
+    }
+    return type;
+  }
+
+  function formatAgentEventDetails(ev) {
+    const type = String(ev.event_type || 'event');
+    if (type === 'windows_event') {
+      return `${ev.provider || 'provider'} · ${ev.level || 'level'} · ${String(ev.message || '').slice(0, 180) || 'No message'}`;
+    }
+    if (type === 'connection_snapshot') {
+      const pid = ev.pid == null ? '—' : String(ev.pid);
+      return `Status ${ev.status || 'unknown'} · PID ${pid}`;
+    }
+    if (type === 'host_identity') {
+      return `FQDN ${ev.fqdn || '—'} · MAC ${(ev.mac_addresses || []).join(', ') || '—'}`;
+    }
+    return JSON.stringify(ev).slice(0, 180);
+  }
+
+  function renderOverviewAgentsFeed() {
+    const feed = document.getElementById('overview-agents-feed');
+    if (!feed) return;
+    const rows = [...S.agentEvents].reverse().slice(0, 10);
+    if (!rows.length) {
+      feed.innerHTML = '<li class="feed-empty">No agent telemetry yet</li>';
+      return;
+    }
+    feed.innerHTML = rows.map((row) => {
+      const ev = row.event || {};
+      const sev = String(ev.event_type || '') === 'windows_event' ? 'sev-medium' : 'sev-low';
+      return `
+      <li class="feed-item">
+        <span class="feed-sev ${sev}">${esc(ev.event_type || 'event')}</span>
+        <div class="feed-body">
+          <div class="feed-msg">${esc(row.hostname || row.agent_id || 'agent')} · ${esc(formatAgentEventSource(ev))}</div>
+          <div class="feed-time">${fmt_dt(row.received_at)} · ${esc(formatAgentEventDetails(ev))}</div>
+        </div>
+      </li>`;
+    }).join('');
+  }
+
+  function renderAgents() {
+    const tbody = document.getElementById('agents-tbody');
+    if (!tbody) return;
+    const q = String(document.getElementById('agent-search')?.value || '').toLowerCase();
+    const statusF = String(document.getElementById('agent-status-filter')?.value || '').toLowerCase();
+    const rows = S.agents.filter((a) => {
+      const hay = [a.hostname, a.os, a.agent_version, (a.local_ips || []).join(','), a.fqdn].join(' ').toLowerCase();
+      return (!statusF || String(a.status || '').toLowerCase() === statusF) && (!q || hay.includes(q));
+    });
+    if (!rows.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="9">No agents registered</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map((a) => `
+      <tr>
+        <td>${String(a.status || '') === 'online' ? '<span class="pill pill-low">Online</span>' : '<span class="pill pill-medium">Stale</span>'}</td>
+        <td>${esc(a.hostname || '—')}</td>
+        <td><code>${esc((a.local_ips || []).join(', ') || '—')}</code></td>
+        <td>${esc(a.os || '—')}</td>
+        <td>${esc(a.agent_version || '—')}</td>
+        <td>${esc(a.queue_depth ?? 0)}</td>
+        <td>${esc(a.event_count ?? 0)}</td>
+        <td class="text-muted text-sm">${fmt_dt(a.last_upload_at)}</td>
+        <td class="text-muted text-sm">${fmt_dt(a.last_seen)}</td>
+      </tr>`).join('');
+  }
+
+  function renderAgentEvents() {
+    const tbody = document.getElementById('agent-events-tbody');
+    if (!tbody) return;
+    const q = String(document.getElementById('agent-event-search')?.value || '').toLowerCase();
+    const typeF = String(document.getElementById('agent-event-type-filter')?.value || '').toLowerCase();
+    const rows = [...S.agentEvents].reverse().filter((row) => {
+      const ev = row.event || {};
+      const eventType = String(ev.event_type || '').toLowerCase();
+      const hay = [
+        row.hostname,
+        row.agent_id,
+        ev.channel,
+        ev.message,
+        ev.local_ip,
+        ev.remote_ip,
+        ev.os,
+        ev.fqdn,
+      ].join(' ').toLowerCase();
+      return (!typeF || eventType === typeF) && (!q || hay.includes(q));
+    }).slice(0, 300);
+    if (!rows.length) {
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No endpoint telemetry found</td></tr>';
+      return;
+    }
+    tbody.innerHTML = rows.map((row) => {
+      const ev = row.event || {};
+      return `
+      <tr>
+        <td class="text-muted text-sm">${fmt_dt(row.received_at)}</td>
+        <td><code>${esc(row.hostname || row.agent_id || 'agent')}</code></td>
+        <td>${esc(ev.event_type || 'event')}</td>
+        <td>${esc(formatAgentEventSource(ev))}</td>
+        <td>${esc(formatAgentEventDetails(ev))}</td>
+        <td>
+          <button class="icon-btn" title="Analyze with AI"
+            data-ai-item="${esc(JSON.stringify(row))}" data-ai-type="event">🤖</button>
+        </td>
+      </tr>`;
+    }).join('');
+    tbody.querySelectorAll('[data-ai-item]').forEach((btn) => {
+      btn.addEventListener('click', () => sendToAI([JSON.parse(btn.dataset.aiItem)], btn.dataset.aiType));
+    });
   }
 
   async function fetchBluetooth() {
@@ -1724,6 +1865,8 @@
     fetchStats();
     fetchSystemStatus();
     fetchEvents();
+    fetchAgents();
+    fetchAgentEvents();
     fetchBluetooth();
     fetchAlerts();
     fetchIncidents();
@@ -1739,12 +1882,15 @@
     setInterval(() => {
       fetchAlerts();
       fetchIncidents();
+      fetchAgents();
+      fetchAgentEvents();
       fetchBluetooth();
       fetchFirewallBlocks();
       fetchNetworkHealth();
       if (document.getElementById('view-risk')?.classList.contains('active'))      fetchHostRisk();
       if (document.getElementById('view-chains')?.classList.contains('active'))    fetchAttackChains();
       if (document.getElementById('view-devices')?.classList.contains('active'))   fetchDevices();
+      if (document.getElementById('view-agents')?.classList.contains('active'))    { fetchAgents(); fetchAgentEvents(); }
       if (document.getElementById('view-bluetooth')?.classList.contains('active')) fetchBluetooth();
       if (document.getElementById('view-firewall')?.classList.contains('active'))  fetchFirewallBlocks();
       if (document.getElementById('view-traffic')?.classList.contains('active'))   fetchConnections();
@@ -1756,6 +1902,11 @@
 
     // Device search
     document.getElementById('device-search')?.addEventListener('input', renderDevices);
+    document.getElementById('agent-search')?.addEventListener('input', renderAgents);
+    document.getElementById('agent-status-filter')?.addEventListener('change', renderAgents);
+    document.getElementById('agent-event-search')?.addEventListener('input', renderAgentEvents);
+    document.getElementById('agent-event-type-filter')?.addEventListener('change', renderAgentEvents);
+    document.getElementById('agent-refresh-btn')?.addEventListener('click', () => { fetchAgents(); fetchAgentEvents(); });
     document.getElementById('btn-scan')?.addEventListener('click', scanSubnet);
     document.getElementById('packets-search')?.addEventListener('input', renderPackets);
     document.getElementById('packets-protocol-filter')?.addEventListener('change', renderPackets);

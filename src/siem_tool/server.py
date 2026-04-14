@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
+import secrets
 import shutil
+import socket
 import subprocess
 import threading
 from collections import deque
@@ -11,15 +14,17 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Deque, Dict, List
+from uuid import uuid4
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .config import SIEMConfig
 from .engine import SIEMEngine
 from .log_manager import LogManager
+from .models import Alert
 from .network_health import NetworkHealthMonitor
 
 # Load .env on import so API key is available immediately
@@ -38,12 +43,22 @@ _recent_connections: Deque[Dict[str, Any]] = deque(maxlen=_MAX_RECENT)
 _recent_bluetooth: Deque[Dict[str, Any]] = deque(maxlen=_MAX_RECENT)
 _recent_packets: Deque[Dict[str, Any]] = deque(maxlen=2000)
 _recent_firewall_blocks: Deque[Dict[str, Any]] = deque(maxlen=1000)
+_recent_agent_events: Deque[Dict[str, Any]] = deque(maxlen=2000)
 _sse_subscribers: List[asyncio.Queue] = []
 _engine: SIEMEngine | None = None
 _log_manager: LogManager | None = None
 _health_monitor: NetworkHealthMonitor | None = None
 _scan_lock = threading.Lock()
+_agent_registry_lock = threading.Lock()
 _started_at = datetime.now(timezone.utc)
+_agent_discovery_thread_started = False
+_agent_server_host = "127.0.0.1"
+_agent_server_port = 8080
+_agent_server_scheme = "http"
+_agent_server_advertise_url = ""
+_agent_enrollment_token = "lab-enroll"
+_agent_discovery_port = 55110
+_agent_heartbeat_timeout_seconds = 180
 
 # ── Settings persistence ──────────────────────────────────────────────────────
 _SETTINGS_PATH = Path("logs/siem_settings.json")
@@ -52,6 +67,8 @@ _DETECTOR_CONTROLS_PATH = Path("logs/detector_controls.json")
 _SAVED_VIEWS_PATH = Path("logs/saved_views.json")
 _ASSET_CRITICALITY_PATH = Path("logs/asset_criticality.json")
 _INCIDENT_ACTIVITY_PATH = Path("logs/incident_activity.jsonl")
+_AGENTS_PATH = Path("logs/agents.json")
+_AGENT_EVENTS_PATH = Path("logs/agent_events.jsonl")
 
 
 def _load_json_file(path: Path, default: Any) -> Any:
@@ -155,6 +172,157 @@ def _write_env_key(key_name: str, value: str) -> None:
         env_path.write_text(f"{key_name}={value}\n", encoding="utf-8")
 
 
+def _utc_now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+def _hash_secret(value: str) -> str:
+    return hashlib.sha256(str(value or "").encode("utf-8", errors="replace")).hexdigest()
+
+
+def _load_agents_registry() -> Dict[str, Dict[str, Any]]:
+    payload = _load_json_file(_AGENTS_PATH, {})
+    return payload if isinstance(payload, dict) else {}
+
+
+def _save_agents_registry(payload: Dict[str, Dict[str, Any]]) -> None:
+    _save_json_file(_AGENTS_PATH, payload)
+
+
+def _agent_status_from_last_seen(last_seen: str) -> str:
+    age = max(0.0, datetime.now(timezone.utc).timestamp() - _to_epoch(last_seen))
+    return "online" if age <= float(max(30, _agent_heartbeat_timeout_seconds)) else "stale"
+
+
+def _public_agent_row(agent_id: str, row: Dict[str, Any]) -> Dict[str, Any]:
+    out = dict(row)
+    out["agent_id"] = agent_id
+    out.pop("agent_key_hash", None)
+    out["status"] = _agent_status_from_last_seen(str(out.get("last_seen", "") or ""))
+    return out
+
+
+def _agent_rows() -> List[Dict[str, Any]]:
+    return [_public_agent_row(agent_id, row) for agent_id, row in _load_agents_registry().items()]
+
+
+def _find_agent_by_installation(registry: Dict[str, Dict[str, Any]], installation_id: str) -> tuple[str, Dict[str, Any]] | tuple[None, None]:
+    for agent_id, row in registry.items():
+        if str(row.get("installation_id", "") or "") == installation_id:
+            return agent_id, row
+    return None, None
+
+
+def _local_ip_for_target(target_ip: str) -> str:
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            sock.connect((target_ip, 1))
+            return str(sock.getsockname()[0] or "")
+    except OSError:
+        return ""
+
+
+def _server_url_for_client(client_ip: str = "") -> str:
+    if _agent_server_advertise_url:
+        return _agent_server_advertise_url
+    host = _agent_server_host
+    if host in ("0.0.0.0", "::", ""):
+        host = _local_ip_for_target(client_ip) or "127.0.0.1"
+    return f"{_agent_server_scheme}://{host}:{int(_agent_server_port)}"
+
+
+def _alerts_from_agent_event(agent_row: Dict[str, Any], event: Dict[str, Any]) -> List[Alert]:
+    alerts: List[Alert] = []
+    event_type = str(event.get("event_type", "") or "").lower()
+    host = str(agent_row.get("hostname", "") or agent_row.get("fqdn", "") or "agent")
+    timestamp = str(event.get("timestamp", "") or _utc_now_iso())
+    if event_type != "windows_event":
+        return alerts
+
+    event_id = int(event.get("event_id", 0) or 0)
+    channel = str(event.get("channel", "") or "Windows")
+    provider = str(event.get("provider", "") or "")
+    message = str(event.get("message", "") or "")
+    base_evidence = {
+        "agent_host": host,
+        "channel": channel,
+        "provider": provider,
+        "event_id": event_id,
+        "message": message[:1200],
+    }
+
+    if event_id == 4625:
+        alerts.append(Alert(
+            timestamp=timestamp,
+            severity="medium",
+            rule="agent_windows_failed_logon",
+            message=f"Endpoint {host} recorded a failed Windows logon attempt (Event ID 4625)",
+            interface=host,
+            observed_value=4625.0,
+            threshold=4625.0,
+            evidence=base_evidence,
+        ))
+    elif event_id == 1102:
+        alerts.append(Alert(
+            timestamp=timestamp,
+            severity="high",
+            rule="agent_windows_audit_log_cleared",
+            message=f"Endpoint {host} cleared the Windows audit log (Event ID 1102)",
+            interface=host,
+            observed_value=1102.0,
+            threshold=1102.0,
+            evidence=base_evidence,
+        ))
+    elif event_id in (4720, 4728, 4732):
+        alerts.append(Alert(
+            timestamp=timestamp,
+            severity="high",
+            rule="agent_windows_account_change",
+            message=f"Endpoint {host} recorded a sensitive account/group change (Event ID {event_id})",
+            interface=host,
+            observed_value=float(event_id),
+            threshold=float(event_id),
+            evidence=base_evidence,
+        ))
+    return alerts
+
+
+def _start_agent_discovery_listener(config: SIEMConfig) -> None:
+    global _agent_discovery_thread_started
+    if _agent_discovery_thread_started:
+        return
+    if not bool(config.agent_api_enabled) or not bool(config.agent_discovery_enabled):
+        return
+    _agent_discovery_thread_started = True
+
+    def _loop() -> None:
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            sock.bind(("", int(_agent_discovery_port)))
+        except OSError:
+            return
+        while True:
+            try:
+                payload, addr = sock.recvfrom(8192)
+                raw = json.loads(payload.decode("utf-8", errors="replace"))
+                if str(raw.get("type", "") or "") != "siem_discovery_request":
+                    continue
+                response = {
+                    "type": "siem_discovery_response",
+                    "server_name": socket.gethostname(),
+                    "server_url": _server_url_for_client(addr[0]),
+                    "server_id": "central-siem",
+                    "enrollment": "token-required",
+                    "nonce": str(raw.get("nonce", "") or ""),
+                }
+                sock.sendto(json.dumps(response, separators=(",", ":")).encode("utf-8"), addr)
+            except Exception:
+                continue
+
+    threading.Thread(target=_loop, daemon=True).start()
+
+
 # ── FastAPI app ───────────────────────────────────────────────────────────────
 app = FastAPI(title="SIEM Dashboard API", docs_url="/api/docs")
 
@@ -221,8 +389,16 @@ def _broadcast_sse(alert: Dict[str, Any]) -> None:
             pass
 
 
-def start_background_engine(config: SIEMConfig) -> None:
+def start_background_engine(
+    config: SIEMConfig,
+    server_host: str = "127.0.0.1",
+    server_port: int = 8080,
+    server_scheme: str = "http",
+) -> None:
     global _engine, _log_manager, _health_monitor
+    global _agent_server_host, _agent_server_port, _agent_server_scheme
+    global _agent_server_advertise_url, _agent_enrollment_token
+    global _agent_discovery_port, _agent_heartbeat_timeout_seconds
     # Apply any previously saved retention overrides
     saved = _load_persisted_settings()
     if "events_retention_hours" in saved:
@@ -251,6 +427,14 @@ def start_background_engine(config: SIEMConfig) -> None:
     )
     _health_monitor.start()
     _log_manager.start_background_pruner()
+    _agent_server_host = str(server_host or "127.0.0.1")
+    _agent_server_port = int(server_port)
+    _agent_server_scheme = str(server_scheme or "http")
+    _agent_server_advertise_url = str(config.agent_advertise_url or "").strip()
+    _agent_enrollment_token = str(config.agent_enrollment_token or "lab-enroll")
+    _agent_discovery_port = int(config.agent_discovery_port)
+    _agent_heartbeat_timeout_seconds = int(config.agent_heartbeat_timeout_seconds)
+    _start_agent_discovery_listener(config)
     t = threading.Thread(target=_run_engine, args=(_engine,), daemon=True)
     t.start()
 
@@ -830,6 +1014,8 @@ async def dashboard() -> HTMLResponse:
 async def stats() -> JSONResponse:
     assert _engine is not None
     devices = _engine.list_devices()
+    agents = _agent_rows()
+    agents_online = sum(1 for row in agents if str(row.get("status", "") or "") == "online")
     alerts_today = list(_recent_alerts)
     high = sum(1 for a in alerts_today if a.get("severity") == "high")
     med = sum(1 for a in alerts_today if a.get("severity") == "medium")
@@ -848,6 +1034,8 @@ async def stats() -> JSONResponse:
     uptime_sec = int((datetime.now(timezone.utc) - _started_at).total_seconds())
     return JSONResponse({
         "device_count": len(devices),
+        "agent_count": len(agents),
+        "agent_count_online": agents_online,
         "alert_count_high": high,
         "alert_count_medium": med,
         "recent_bandwidth_bps": host_avg_bps,
@@ -867,6 +1055,7 @@ async def stats() -> JSONResponse:
 async def system_status() -> JSONResponse:
     if _engine is None:
         return JSONResponse({"status": "starting"})
+    agents = _agent_rows()
     fw_status = _engine.firewall_monitor.status()
     health = _health_monitor.status() if _health_monitor is not None else {
         "status": "unknown",
@@ -883,6 +1072,10 @@ async def system_status() -> JSONResponse:
     return JSONResponse({
         "status": "running",
         "capture_mode": _engine.config.capture_mode,
+        "agent_api_enabled": bool(_engine.config.agent_api_enabled),
+        "agent_discovery_enabled": bool(_engine.config.agent_discovery_enabled),
+        "agent_count": len(agents),
+        "agent_online": sum(1 for row in agents if str(row.get("status", "") or "") == "online"),
         "capture_interface": _engine.config.capture_interface or "auto",
         "capture_filter": _engine.config.capture_bpf or "ip or ip6",
         "pcap_rolling_file": _engine.config.pcap_rolling_file,
@@ -987,6 +1180,182 @@ async def scan_subnet() -> JSONResponse:
         return JSONResponse({"new_devices": count})
     finally:
         _scan_lock.release()
+
+
+class AgentRegisterBody(BaseModel):
+    token: str
+    installation_id: str
+    hostname: str
+    fqdn: str = ""
+    os: str = ""
+    username: str = ""
+    agent_version: str = ""
+    local_ips: List[str] = Field(default_factory=list)
+    mac_addresses: List[str] = Field(default_factory=list)
+
+
+class AgentHeartbeatBody(BaseModel):
+    agent_id: str
+    agent_key: str
+    queue_depth: int = 0
+    service_uptime_seconds: float = 0.0
+    collector_status: str = "ok"
+    local_ips: List[str] = Field(default_factory=list)
+
+
+class AgentEventsBulkBody(BaseModel):
+    agent_id: str
+    agent_key: str
+    sequence: int
+    sent_at: str = ""
+    events: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+def _require_authenticated_agent(agent_id: str, agent_key: str) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
+    registry = _load_agents_registry()
+    row = registry.get(agent_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Agent not registered")
+    if str(row.get("agent_key_hash", "") or "") != _hash_secret(agent_key):
+        raise HTTPException(status_code=401, detail="Invalid agent credentials")
+    return registry, row
+
+
+@app.get("/api/agents")
+async def list_agents() -> JSONResponse:
+    rows = _agent_rows()
+    rows.sort(key=lambda r: str(r.get("last_seen", "") or ""), reverse=True)
+    return JSONResponse(rows)
+
+
+@app.get("/api/agents/events")
+async def list_agent_events(limit: int = 200, agent_id: str = "") -> JSONResponse:
+    lim = max(1, min(int(limit), 2000))
+    rows = list(_recent_agent_events)
+    if not rows:
+        rows = _tail_jsonl(_AGENT_EVENTS_PATH, lim)
+    if agent_id:
+        rows = [row for row in rows if str(row.get("agent_id", "") or "") == str(agent_id)]
+    return JSONResponse(rows[-lim:])
+
+
+@app.post("/api/agents/register")
+async def register_agent(body: AgentRegisterBody, request: Request) -> JSONResponse:
+    if _engine is None or not bool(_engine.config.agent_api_enabled):
+        raise HTTPException(status_code=503, detail="Agent API is disabled")
+    if str(body.token or "") != _agent_enrollment_token:
+        raise HTTPException(status_code=401, detail="Invalid enrollment token")
+
+    installation_id = str(body.installation_id or "").strip()
+    hostname = str(body.hostname or "").strip()
+    if not installation_id or not hostname:
+        raise HTTPException(status_code=400, detail="installation_id and hostname are required")
+
+    agent_key = secrets.token_urlsafe(32)
+    now_iso = _utc_now_iso()
+    with _agent_registry_lock:
+        registry = _load_agents_registry()
+        agent_id, existing = _find_agent_by_installation(registry, installation_id)
+        if agent_id is None or existing is None:
+            agent_id = str(uuid4())
+            existing = {
+                "registered_at": now_iso,
+                "event_count": 0,
+                "last_sequence": 0,
+            }
+        existing.update({
+            "installation_id": installation_id,
+            "hostname": hostname,
+            "fqdn": str(body.fqdn or "").strip(),
+            "os": str(body.os or "").strip(),
+            "username": str(body.username or "").strip(),
+            "agent_version": str(body.agent_version or "").strip(),
+            "local_ips": [str(ip).strip() for ip in body.local_ips if str(ip).strip()],
+            "mac_addresses": [str(mac).strip() for mac in body.mac_addresses if str(mac).strip()],
+            "last_seen": now_iso,
+            "last_heartbeat": now_iso,
+            "server_url": _server_url_for_client(request.client.host if request.client else ""),
+            "agent_key_hash": _hash_secret(agent_key),
+        })
+        registry[agent_id] = existing
+        _save_agents_registry(registry)
+
+    return JSONResponse({
+        "ok": True,
+        "agent_id": agent_id,
+        "agent_key": agent_key,
+        "server_url": _server_url_for_client(request.client.host if request.client else ""),
+        "heartbeat_interval_seconds": 30,
+    })
+
+
+@app.post("/api/agents/heartbeat")
+async def agent_heartbeat(body: AgentHeartbeatBody) -> JSONResponse:
+    if _engine is None or not bool(_engine.config.agent_api_enabled):
+        raise HTTPException(status_code=503, detail="Agent API is disabled")
+    now_iso = _utc_now_iso()
+    with _agent_registry_lock:
+        registry, row = _require_authenticated_agent(body.agent_id, body.agent_key)
+        row.update({
+            "last_seen": now_iso,
+            "last_heartbeat": now_iso,
+            "queue_depth": max(0, int(body.queue_depth)),
+            "service_uptime_seconds": max(0.0, float(body.service_uptime_seconds)),
+            "collector_status": str(body.collector_status or "ok").strip() or "ok",
+            "local_ips": [str(ip).strip() for ip in body.local_ips if str(ip).strip()] or row.get("local_ips", []),
+        })
+        registry[body.agent_id] = row
+        _save_agents_registry(registry)
+    return JSONResponse({"ok": True, "status": _agent_status_from_last_seen(now_iso)})
+
+
+@app.post("/api/agents/events/bulk")
+async def agent_events_bulk(body: AgentEventsBulkBody) -> JSONResponse:
+    if _engine is None or not bool(_engine.config.agent_api_enabled):
+        raise HTTPException(status_code=503, detail="Agent API is disabled")
+    if body.sequence <= 0:
+        raise HTTPException(status_code=400, detail="sequence must be positive")
+
+    now_iso = _utc_now_iso()
+    accepted = 0
+    with _agent_registry_lock:
+        registry, row = _require_authenticated_agent(body.agent_id, body.agent_key)
+        last_sequence = int(row.get("last_sequence", 0) or 0)
+        if body.sequence <= last_sequence:
+            return JSONResponse({"ok": True, "accepted": 0, "duplicate": True, "last_sequence": last_sequence})
+
+        generated_alerts: List[Alert] = []
+
+        for event in body.events:
+            wrapped = {
+                "received_at": now_iso,
+                "agent_id": body.agent_id,
+                "sequence": body.sequence,
+                "sent_at": str(body.sent_at or "").strip() or now_iso,
+                "hostname": str(row.get("hostname", "") or ""),
+                "event": event,
+            }
+            _append_jsonl(_AGENT_EVENTS_PATH, wrapped)
+            _recent_agent_events.append(wrapped)
+            generated_alerts.extend(_alerts_from_agent_event(row, event))
+            accepted += 1
+
+        row["last_seen"] = now_iso
+        row["last_upload_at"] = now_iso
+        row["last_sequence"] = int(body.sequence)
+        row["event_count"] = int(row.get("event_count", 0) or 0) + accepted
+        row["last_upload_count"] = accepted
+        registry[body.agent_id] = row
+        _save_agents_registry(registry)
+
+    if generated_alerts and _engine is not None:
+        _engine.store.write_alerts(generated_alerts)
+        for alert in generated_alerts:
+            d = asdict(alert)
+            _recent_alerts.appendleft(d)
+            _broadcast_sse(d)
+
+    return JSONResponse({"ok": True, "accepted": accepted, "last_sequence": body.sequence})
 
 
 @app.get("/api/alerts")

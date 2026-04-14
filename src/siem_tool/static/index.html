@@ -21,6 +21,7 @@
       <nav>
         <a class="nav-link active" data-view="overview" href="#">Overview</a>
         <a class="nav-link" data-view="devices"  href="#">Devices</a>
+        <a class="nav-link" data-view="agents" href="#">Agents</a>
         <a class="nav-link" data-view="bluetooth" href="#">Bluetooth</a>
         <a class="nav-link" data-view="alerts"   href="#">Alerts</a>
         <a class="nav-link" data-view="incidents" href="#">Incidents</a>
@@ -58,6 +59,10 @@
           <div class="stat-card">
             <div class="stat-label">Devices Detected</div>
             <div class="stat-value" id="stat-devices">—</div>
+          </div>
+          <div class="stat-card info">
+            <div class="stat-label">Agents Online</div>
+            <div class="stat-value" id="stat-agents">—</div>
           </div>
           <div class="stat-card danger" id="stat-card-high">
             <div class="stat-label">High Alerts</div>
@@ -129,6 +134,16 @@
 
         <div class="card">
           <div class="card-header">
+            <span>Recent Endpoint Activity</span>
+            <a class="card-link" data-view="agents" href="#">View Agents</a>
+          </div>
+          <ul class="feed" id="overview-agents-feed">
+            <li class="feed-empty">No agent telemetry yet</li>
+          </ul>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
             <span>Correlated Incidents (Phase 4)</span>
             <a class="card-link" data-view="incidents" href="#">View Incidents</a>
           </div>
@@ -152,6 +167,72 @@
           <ul class="feed" id="overview-health-feed">
             <li class="feed-empty">Collecting probe data...</li>
           </ul>
+        </div>
+      </section>
+
+      <!-- ── VIEW: Agents ──────────────────────────────── -->
+      <section class="view" id="view-agents">
+        <div class="card">
+          <div class="card-header">
+            <span>Endpoint Agents</span>
+            <div class="card-actions">
+              <select class="filter-select" id="agent-status-filter">
+                <option value="">All statuses</option>
+                <option value="online">Online</option>
+                <option value="stale">Stale</option>
+              </select>
+              <input class="search-box" id="agent-search" type="text" placeholder="Filter host, IP, OS, version..." />
+              <button class="btn btn-primary" id="agent-refresh-btn" type="button">Refresh</button>
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="agents-table">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Hostname</th>
+                  <th>IPs</th>
+                  <th>OS</th>
+                  <th>Version</th>
+                  <th>Queue</th>
+                  <th>Events</th>
+                  <th>Last Upload</th>
+                  <th>Last Seen</th>
+                </tr>
+              </thead>
+              <tbody id="agents-tbody"></tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <span>Endpoint Telemetry</span>
+            <div class="card-actions">
+              <select class="filter-select" id="agent-event-type-filter">
+                <option value="">All event types</option>
+                <option value="host_identity">Host Identity</option>
+                <option value="connection_snapshot">Connections</option>
+                <option value="windows_event">Windows Events</option>
+              </select>
+              <input class="search-box" id="agent-event-search" type="text" placeholder="Filter host, channel, message, IP..." />
+            </div>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table" id="agent-events-table">
+              <thead>
+                <tr>
+                  <th>Received</th>
+                  <th>Agent</th>
+                  <th>Type</th>
+                  <th>Source</th>
+                  <th>Details</th>
+                  <th>AI</th>
+                </tr>
+              </thead>
+              <tbody id="agent-events-tbody"></tbody>
+            </table>
+          </div>
         </div>
       </section>
 

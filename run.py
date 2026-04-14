@@ -43,7 +43,7 @@ def main() -> None:
         config.capture_interface = args.capture_interface
     if args.capture_filter is not None:
         config.capture_bpf = args.capture_filter
-    start_background_engine(config)
+    start_background_engine(config, server_host=args.host, server_port=args.port, server_scheme="http")
 
     url = f"http://{'localhost' if args.host in ('0.0.0.0','127.0.0.1') else args.host}:{args.port}"
     print(f"\n  [SIEM] Dashboard running at {url}\n")

@@ -41,6 +41,8 @@ Build a simple, local-first Python SIEM that ingests network information and fla
 4. Add authN/authZ, certificates, and signed agent identity.
 5. Build dashboard and alert integrations.
 
+See `docs/agent-server-design.md` for the proposed central-host plus lightweight-agent architecture.
+
 ## Operational Notes
 
 - Start as local service or scheduled task.

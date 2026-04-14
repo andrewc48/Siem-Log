@@ -1,6 +1,6 @@
 # SIEM Dashboard
 
-A self-contained Python network security monitor with a live web dashboard, AI-powered analysis, and automatic log management.
+A central-host Python SIEM with a live web dashboard, lightweight Windows endpoint agents, AI-powered analysis, and automatic log management.
 
 ## Features
 
@@ -15,10 +15,22 @@ A self-contained Python network security monitor with a live web dashboard, AI-p
 - **Anomaly detection** — absolute threshold, spike detection (EWMA), suspicious-port alerts, connection fan-out detection
 - **Device inventory** — ARP-cache scanning, subnet ping-sweep, custom device names, persistent inventory
 - **Bluetooth monitor (local host)** — logs Bluetooth device connect/disconnect state changes (Windows PnP based)
+- **Endpoint agent mode** — lightweight `siem-agent` collects host telemetry on monitored Windows devices and forwards it to the central SIEM host
+- **Agent inventory + endpoint telemetry UI** — dedicated Agents view for endpoint health, queue depth, uploads, and recent forwarded telemetry
+- **Windows endpoint detections** — failed logons, audit log clears, and sensitive account/group changes can generate alerts from agent-fed Windows events
 - **Live web dashboard** — dark-theme single-page app with Overview, Devices, Alerts, Traffic, Settings, and AI Analyzer views
 - **AI Analyzer** — chat interface backed by OpenAI (gpt-4o-mini by default); load any alert, connection, or device as context for instant analysis
 - **Log retention** — configurable per-category retention (hours); background pruner runs automatically; manual prune-now button in UI
 - **Portable** — runs locally (127.0.0.1) or exposed on a server (0.0.0.0); no external services required except OpenAI (optional)
+
+## Architecture
+
+The project supports a central-server deployment model.
+
+- The central SIEM host runs the full dashboard, storage, detections, incident workflow, and optional packet sensor.
+- Endpoint devices run a lightweight `siem-agent` process that forwards local telemetry to the central host.
+- Endpoint agents can use UDP discovery on the local subnet to find the server, or connect directly with `--server-url`.
+- The central dashboard correlates server-side network sensor data with endpoint Windows and host telemetry.
 
 ---
 
@@ -53,6 +65,15 @@ siem --serve
 
 # Whole-network sensor mode (requires Npcap + mirrored/bridged NIC)
 python run.py --capture-mode pcap
+
+# Lightweight endpoint agent for monitored devices
+siem-agent --server-url http://192.168.1.10:8080 --token lab-enroll
+```
+
+If the endpoint is on the same subnet and the central host has discovery enabled, the agent can also auto-discover the SIEM host:
+
+```bash
+siem-agent --token lab-enroll
 ```
 
 ## Quick Deploy (Release)
@@ -101,6 +122,11 @@ python run.py --capture-mode pcap --host 0.0.0.0 --port 8080
   - copy `.env.example` to `.env`
   - add your OpenAI key, or paste it in Settings and save
 
+7. Optional endpoint deployment:
+  - run the full dashboard only on the central SIEM host
+  - run `siem-agent` on monitored Windows endpoints
+  - review agent state and forwarded telemetry in the dashboard `Agents` view
+
 ## Run Without VS Code (One Click)
 
 For Windows machines, you can launch with a double-click and automatic dependency setup:
@@ -119,7 +145,43 @@ For sensor nodes that should capture mirrored traffic, use:
 
 - `NetworkMonitor-Start-PCAP.bat`
 
-This launches in `pcap` mode and binds to `0.0.0.0:8080`.
+For monitored Windows endpoints that should forward host telemetry to the central server, use:
+
+- `NetworkMonitor-Agent-Start.bat`
+
+`NetworkMonitor-Start-PCAP.bat` launches the full server in `pcap` mode and binds to `0.0.0.0:8080`.
+
+The agent launcher starts `siem-agent`, which discovers or connects to the server, enrolls, and begins forwarding endpoint telemetry.
+
+## Endpoint Agent
+
+The endpoint agent is a lightweight collector intended for monitored Windows systems.
+
+It is responsible for:
+
+- server discovery or direct connection
+- agent enrollment and heartbeat
+- local event batching and retry/spool behavior
+- forwarding host telemetry to the central SIEM host
+
+Current endpoint telemetry includes:
+
+- Windows Event Logs from `Security`, `System`, and `Application`
+- active connection snapshots
+- host identity and heartbeat metadata
+
+Example agent commands:
+
+```bash
+# Same-subnet discovery
+siem-agent --token lab-enroll
+
+# Explicit server URL
+siem-agent --server-url http://192.168.1.10:8080 --token lab-enroll
+
+# Run one collection/upload cycle only
+siem-agent --server-url http://192.168.1.10:8080 --token lab-enroll --once
+```
 
 ## Build a Portable EXE (Optional)
 
@@ -193,6 +255,14 @@ siem --scan-subnet                     # active ping sweep
 siem --duration 60                     # run CLI monitor for 60 s
 ```
 
+### Endpoint agent CLI
+
+```bash
+siem-agent --token lab-enroll
+siem-agent --server-url http://192.168.1.10:8080 --token lab-enroll
+siem-agent --server-url http://192.168.1.10:8080 --token lab-enroll --once
+```
+
 ---
 
 ## Configuration
@@ -240,6 +310,12 @@ Edit `config/default_config.json` or supply a custom path with `--config`.
 | `events_retention_hours` | 24 | How long event/connection logs are kept |
 | `alerts_retention_hours` | 72 | How long alert logs are kept (3 days) |
 | `log_prune_interval_minutes` | 30 | How often the background pruner runs |
+| `agent_api_enabled` | true | Enable the central server agent enrollment/upload API |
+| `agent_enrollment_token` | `lab-enroll` | Shared bootstrap token used for initial endpoint agent enrollment |
+| `agent_discovery_enabled` | true | Enable UDP subnet discovery replies from the central server |
+| `agent_discovery_port` | 55110 | UDP port used by endpoint agents to discover the server |
+| `agent_advertise_url` | `""` | Optional explicit URL returned to agents instead of auto-derived host:port |
+| `agent_heartbeat_timeout_seconds` | 180 | How long before an agent is marked stale in the dashboard |
 
 All retention settings can also be changed live from the dashboard **Settings** view.
 
@@ -320,25 +396,36 @@ SIEM Tool/
 │   ├── connections.jsonl
 │   ├── packets.jsonl
 │   ├── alerts.jsonl
+│   ├── agent_events.jsonl
+│   ├── agents.json
 │   ├── bluetooth.jsonl
 │   ├── devices.json
 │   ├── device_aliases.json
 │   └── siem_settings.json          ← runtime settings saved via UI
-└── src/siem_tool/
-    ├── config.py                   ← SIEMConfig dataclass + loader
-    ├── models.py                   ← NetworkEvent, Alert, ConnectionEvent, DeviceRecord
-    ├── collector.py                ← psutil telemetry collector
-    ├── detector.py                 ← rule-based anomaly detector
-    ├── storage.py                  ← JSONL persistence
-    ├── device_monitor.py           ← ARP scanning, device inventory, aliases
-    ├── engine.py                   ← orchestrates all components
-    ├── log_manager.py              ← log retention / pruning
-    ├── server.py                   ← FastAPI app (REST + SSE + AI)
-    ├── cli.py                      ← argparse CLI entry point
-    └── static/
-        ├── index.html
-        ├── style.css
-        └── app.js
+└── src/
+  ├── siem_tool/
+  │   ├── config.py               ← SIEMConfig dataclass + loader
+  │   ├── models.py               ← NetworkEvent, Alert, ConnectionEvent, DeviceRecord
+  │   ├── collector.py            ← psutil telemetry collector
+  │   ├── detector.py             ← rule-based anomaly detector
+  │   ├── storage.py              ← JSONL persistence
+  │   ├── device_monitor.py       ← ARP scanning, device inventory, aliases
+  │   ├── engine.py               ← orchestrates all components
+  │   ├── log_manager.py          ← log retention / pruning
+  │   ├── server.py               ← FastAPI app (REST + SSE + AI + agent ingest)
+  │   ├── cli.py                  ← argparse CLI entry point for the full server
+  │   └── static/
+  │       ├── index.html
+  │       ├── style.css
+  │       └── app.js
+  └── siem_agent/
+    ├── cli.py                  ← endpoint agent entry point
+    ├── collector.py            ← endpoint telemetry collection
+    ├── windows_events.py       ← Windows Event Log collection
+    ├── transport.py            ← HTTP transport to central server
+    ├── discovery.py            ← UDP discovery client
+    ├── spool.py                ← local retry queue/spool
+    └── identity.py             ← host identity + installation ID helpers
 ```
 
 ---
@@ -353,6 +440,11 @@ SIEM Tool/
 | GET | `/api/startup/diagnostics` | Startup blockers and remediation suggestions |
 | GET | `/api/setup/wizard` | First-run readiness checklist |
 | GET | `/api/devices` | All discovered devices |
+| GET | `/api/agents` | Registered endpoint agents and current health state |
+| GET | `/api/agents/events?limit=N` | Recent endpoint telemetry forwarded by agents |
+| POST | `/api/agents/register` | Agent enrollment and credential issuance |
+| POST | `/api/agents/heartbeat` | Agent heartbeat / queue health update |
+| POST | `/api/agents/events/bulk` | Bulk endpoint telemetry ingest |
 | PUT | `/api/devices/{ip}/alias` | Set device name |
 | DELETE | `/api/devices/{ip}/alias` | Clear device name |
 | POST | `/api/scan` | Trigger subnet ping-sweep |
@@ -405,10 +497,12 @@ Additional optional context arrays are supported:
 - `context_health`
 
 
-## Current Scope (Phase 1)
+## Current Scope
 
-- Local single-host collection
-- Polling-based telemetry every N seconds
+- Central-host dashboard and API
+- Optional packet-sensor mode on the server
+- Lightweight endpoint agents for Windows devices
+- Polling-based telemetry and batched endpoint forwarding
 - Rule-based anomaly detection:
 	- absolute bandwidth threshold
 	- relative bandwidth spike detection
@@ -417,17 +511,19 @@ Additional optional context arrays are supported:
   - firewall-block burst brute-force indicators
   - periodic beaconing indicators (timing/jitter based)
   - unusual TLS fingerprint fan-out indicators
+  - Windows endpoint failed logon, audit-log-clear, and account-change indicators from forwarded event logs
 	- correlated incidents (Phase 4 actor/family scoring)
 	- high established-connection fan-out from one remote IP
-- Local JSONL output
+- Local JSONL output on the central server
+- Agent inventory, heartbeat state, and recent endpoint telemetry in the UI
 
 ## Future Scope (Phase 2+)
 
-- Stream ingestion from multiple agents
-- Authentication between agents and server
+- Stronger per-agent auth and certificate-based trust
 - Central event pipeline (e.g., queue + database)
 - Alert routing (email, webhook, Slack)
 - Enrichment and correlation rules
+- Additional endpoint telemetry such as Sysmon, PowerShell, Defender, USB, and service/task changes
 
 ## Quick Start
 
@@ -469,6 +565,8 @@ siem --set-device-name 192.168.1.20 "Office-Laptop"
 - `logs/packets.jsonl`: packet metadata rows in pcap mode
 - `logs/firewall_blocks.jsonl`: parsed Windows Firewall block events
 - `logs/alerts.jsonl`: one alert per line
+- `logs/agent_events.jsonl`: forwarded endpoint telemetry rows received from agents
+- `logs/agents.json`: registered endpoint agent inventory and heartbeat state
 - `logs/devices.json`: current discovered device inventory
 - `logs/device_aliases.json`: user-defined names by IP
 - `logs/archive/*.jsonl`: long-term archived records moved from active logs by retention pruning
@@ -482,6 +580,8 @@ Retention controls:
 
 - In `host` capture mode, telemetry is based on host counters and active local sockets.
 - In `pcap` capture mode, packet metadata and payload previews are captured from mirrored traffic.
+- `siem-agent` is the lightweight endpoint collector for Windows systems and forwards host telemetry to the central server.
+- UDP discovery is intended for same-subnet labs; use `--server-url` for routed or VLAN-separated environments.
 - Connection collection relies on `psutil.net_connections` and may require elevated privileges on some hosts.
 - Device inventory is local-network focused by default (private/link-local addresses, excluding broadcast-style addresses).
 - Device naming attempts include reverse DNS and (on Windows) network-display fallbacks such as `ping -a` and `nbtstat -A`.

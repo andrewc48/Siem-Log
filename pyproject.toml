@@ -16,6 +16,7 @@ dependencies = [
 
 [project.scripts]
 siem = "siem_tool.cli:main"
+siem-agent = "siem_agent.cli:main"
 
 [build-system]
 requires = ["setuptools>=68", "wheel"]
