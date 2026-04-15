@@ -59,6 +59,10 @@ _agent_server_advertise_url = ""
 _agent_enrollment_token = "lab-enroll"
 _agent_discovery_port = 55110
 _agent_heartbeat_timeout_seconds = 180
+_agent_require_client_certificate = False
+_agent_trusted_proxy_ips = {"127.0.0.1", "::1"}
+_agent_client_cert_subject_header = "X-Client-Cert-Subject"
+_agent_client_cert_fingerprint_header = "X-Client-Cert-Fingerprint"
 
 # ── Settings persistence ──────────────────────────────────────────────────────
 _SETTINGS_PATH = Path("logs/siem_settings.json")
@@ -198,6 +202,8 @@ def _public_agent_row(agent_id: str, row: Dict[str, Any]) -> Dict[str, Any]:
     out = dict(row)
     out["agent_id"] = agent_id
     out.pop("agent_key_hash", None)
+    out.pop("client_cert_subject", None)
+    out.pop("client_cert_fingerprint", None)
     out["status"] = _agent_status_from_last_seen(str(out.get("last_seen", "") or ""))
     return out
 
@@ -231,6 +237,35 @@ def _server_url_for_client(client_ip: str = "") -> str:
     return f"{_agent_server_scheme}://{host}:{int(_agent_server_port)}"
 
 
+def _agent_request_certificate_metadata(request: Request) -> Dict[str, str]:
+    client_ip = str(request.client.host if request.client else "")
+    if client_ip not in _agent_trusted_proxy_ips:
+        return {}
+    subject = str(request.headers.get(_agent_client_cert_subject_header, "") or "").strip()
+    fingerprint = str(request.headers.get(_agent_client_cert_fingerprint_header, "") or "").strip()
+    if not subject and not fingerprint:
+        return {}
+    return {
+        "client_cert_subject": subject,
+        "client_cert_fingerprint": fingerprint,
+        "proxy_client_ip": client_ip,
+    }
+
+
+def _enforce_agent_certificate_policy(request: Request, row: Dict[str, Any] | None = None) -> Dict[str, str]:
+    metadata = _agent_request_certificate_metadata(request)
+    if row is not None:
+        expected = str(row.get("client_cert_fingerprint", "") or "").strip()
+        if expected:
+            if str(metadata.get("client_cert_fingerprint", "") or "") != expected:
+                raise HTTPException(status_code=401, detail="Client certificate fingerprint mismatch")
+            return metadata
+    if _agent_require_client_certificate:
+        if not metadata.get("client_cert_fingerprint"):
+            raise HTTPException(status_code=401, detail="Client certificate is required")
+    return metadata
+
+
 def _alerts_from_agent_event(agent_row: Dict[str, Any], event: Dict[str, Any]) -> List[Alert]:
     alerts: List[Alert] = []
     event_type = str(event.get("event_type", "") or "").lower()
@@ -241,11 +276,14 @@ def _alerts_from_agent_event(agent_row: Dict[str, Any], event: Dict[str, Any]) -
 
     event_id = int(event.get("event_id", 0) or 0)
     channel = str(event.get("channel", "") or "Windows")
+    event_subtype = str(event.get("event_subtype", "windows") or "windows").lower()
     provider = str(event.get("provider", "") or "")
     message = str(event.get("message", "") or "")
+    message_lower = message.lower()
     base_evidence = {
         "agent_host": host,
         "channel": channel,
+        "event_subtype": event_subtype,
         "provider": provider,
         "event_id": event_id,
         "message": message[:1200],
@@ -284,6 +322,46 @@ def _alerts_from_agent_event(agent_row: Dict[str, Any], event: Dict[str, Any]) -
             threshold=float(event_id),
             evidence=base_evidence,
         ))
+
+    if event_subtype == "defender" and event_id in (1116, 1117):
+        alerts.append(Alert(
+            timestamp=timestamp,
+            severity="high",
+            rule="agent_defender_detection",
+            message=f"Endpoint {host} reported a Microsoft Defender malware detection (Event ID {event_id})",
+            interface=host,
+            observed_value=float(event_id),
+            threshold=float(event_id),
+            evidence=base_evidence,
+        ))
+
+    if event_subtype == "powershell" and event_id in (4103, 4104):
+        suspicious_terms = ("encodedcommand", "frombase64string", "invoke-expression", "iex ", "downloadstring", "webclient")
+        if any(term in message_lower for term in suspicious_terms):
+            alerts.append(Alert(
+                timestamp=timestamp,
+                severity="high",
+                rule="agent_powershell_suspicious_script_block",
+                message=f"Endpoint {host} logged a suspicious PowerShell script block (Event ID {event_id})",
+                interface=host,
+                observed_value=float(event_id),
+                threshold=float(event_id),
+                evidence=base_evidence,
+            ))
+
+    if event_subtype == "sysmon" and event_id == 1:
+        suspicious_process_terms = (" -enc", "encodedcommand", "rundll32", "regsvr32", "mshta", "certutil")
+        if any(term in message_lower for term in suspicious_process_terms):
+            alerts.append(Alert(
+                timestamp=timestamp,
+                severity="high",
+                rule="agent_sysmon_suspicious_process_creation",
+                message=f"Endpoint {host} recorded suspicious Sysmon process creation activity",
+                interface=host,
+                observed_value=1.0,
+                threshold=1.0,
+                evidence=base_evidence,
+            ))
     return alerts
 
 
@@ -399,6 +477,8 @@ def start_background_engine(
     global _agent_server_host, _agent_server_port, _agent_server_scheme
     global _agent_server_advertise_url, _agent_enrollment_token
     global _agent_discovery_port, _agent_heartbeat_timeout_seconds
+    global _agent_require_client_certificate, _agent_trusted_proxy_ips
+    global _agent_client_cert_subject_header, _agent_client_cert_fingerprint_header
     # Apply any previously saved retention overrides
     saved = _load_persisted_settings()
     if "events_retention_hours" in saved:
@@ -434,6 +514,10 @@ def start_background_engine(
     _agent_enrollment_token = str(config.agent_enrollment_token or "lab-enroll")
     _agent_discovery_port = int(config.agent_discovery_port)
     _agent_heartbeat_timeout_seconds = int(config.agent_heartbeat_timeout_seconds)
+    _agent_require_client_certificate = bool(config.agent_require_client_certificate)
+    _agent_trusted_proxy_ips = set(str(ip).strip() for ip in config.agent_trusted_proxy_ips if str(ip).strip()) or {"127.0.0.1", "::1"}
+    _agent_client_cert_subject_header = str(config.agent_client_cert_subject_header or "X-Client-Cert-Subject")
+    _agent_client_cert_fingerprint_header = str(config.agent_client_cert_fingerprint_header or "X-Client-Cert-Fingerprint")
     _start_agent_discovery_listener(config)
     t = threading.Thread(target=_run_engine, args=(_engine,), daemon=True)
     t.start()
@@ -1211,14 +1295,15 @@ class AgentEventsBulkBody(BaseModel):
     events: List[Dict[str, Any]] = Field(default_factory=list)
 
 
-def _require_authenticated_agent(agent_id: str, agent_key: str) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Any]]:
+def _require_authenticated_agent(request: Request, agent_id: str, agent_key: str) -> tuple[Dict[str, Dict[str, Any]], Dict[str, Any], Dict[str, str]]:
     registry = _load_agents_registry()
     row = registry.get(agent_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Agent not registered")
     if str(row.get("agent_key_hash", "") or "") != _hash_secret(agent_key):
         raise HTTPException(status_code=401, detail="Invalid agent credentials")
-    return registry, row
+    metadata = _enforce_agent_certificate_policy(request, row)
+    return registry, row, metadata
 
 
 @app.get("/api/agents")
@@ -1251,6 +1336,8 @@ async def register_agent(body: AgentRegisterBody, request: Request) -> JSONRespo
     if not installation_id or not hostname:
         raise HTTPException(status_code=400, detail="installation_id and hostname are required")
 
+    cert_metadata = _enforce_agent_certificate_policy(request)
+
     agent_key = secrets.token_urlsafe(32)
     now_iso = _utc_now_iso()
     with _agent_registry_lock:
@@ -1276,6 +1363,8 @@ async def register_agent(body: AgentRegisterBody, request: Request) -> JSONRespo
             "last_heartbeat": now_iso,
             "server_url": _server_url_for_client(request.client.host if request.client else ""),
             "agent_key_hash": _hash_secret(agent_key),
+            "client_cert_subject": str(cert_metadata.get("client_cert_subject", "") or existing.get("client_cert_subject", "") or ""),
+            "client_cert_fingerprint": str(cert_metadata.get("client_cert_fingerprint", "") or existing.get("client_cert_fingerprint", "") or ""),
         })
         registry[agent_id] = existing
         _save_agents_registry(registry)
@@ -1290,12 +1379,12 @@ async def register_agent(body: AgentRegisterBody, request: Request) -> JSONRespo
 
 
 @app.post("/api/agents/heartbeat")
-async def agent_heartbeat(body: AgentHeartbeatBody) -> JSONResponse:
+async def agent_heartbeat(body: AgentHeartbeatBody, request: Request) -> JSONResponse:
     if _engine is None or not bool(_engine.config.agent_api_enabled):
         raise HTTPException(status_code=503, detail="Agent API is disabled")
     now_iso = _utc_now_iso()
     with _agent_registry_lock:
-        registry, row = _require_authenticated_agent(body.agent_id, body.agent_key)
+        registry, row, cert_metadata = _require_authenticated_agent(request, body.agent_id, body.agent_key)
         row.update({
             "last_seen": now_iso,
             "last_heartbeat": now_iso,
@@ -1303,6 +1392,8 @@ async def agent_heartbeat(body: AgentHeartbeatBody) -> JSONResponse:
             "service_uptime_seconds": max(0.0, float(body.service_uptime_seconds)),
             "collector_status": str(body.collector_status or "ok").strip() or "ok",
             "local_ips": [str(ip).strip() for ip in body.local_ips if str(ip).strip()] or row.get("local_ips", []),
+            "client_cert_subject": str(cert_metadata.get("client_cert_subject", "") or row.get("client_cert_subject", "") or ""),
+            "client_cert_fingerprint": str(cert_metadata.get("client_cert_fingerprint", "") or row.get("client_cert_fingerprint", "") or ""),
         })
         registry[body.agent_id] = row
         _save_agents_registry(registry)
@@ -1310,7 +1401,7 @@ async def agent_heartbeat(body: AgentHeartbeatBody) -> JSONResponse:
 
 
 @app.post("/api/agents/events/bulk")
-async def agent_events_bulk(body: AgentEventsBulkBody) -> JSONResponse:
+async def agent_events_bulk(body: AgentEventsBulkBody, request: Request) -> JSONResponse:
     if _engine is None or not bool(_engine.config.agent_api_enabled):
         raise HTTPException(status_code=503, detail="Agent API is disabled")
     if body.sequence <= 0:
@@ -1319,7 +1410,7 @@ async def agent_events_bulk(body: AgentEventsBulkBody) -> JSONResponse:
     now_iso = _utc_now_iso()
     accepted = 0
     with _agent_registry_lock:
-        registry, row = _require_authenticated_agent(body.agent_id, body.agent_key)
+        registry, row, cert_metadata = _require_authenticated_agent(request, body.agent_id, body.agent_key)
         last_sequence = int(row.get("last_sequence", 0) or 0)
         if body.sequence <= last_sequence:
             return JSONResponse({"ok": True, "accepted": 0, "duplicate": True, "last_sequence": last_sequence})
@@ -1345,6 +1436,8 @@ async def agent_events_bulk(body: AgentEventsBulkBody) -> JSONResponse:
         row["last_sequence"] = int(body.sequence)
         row["event_count"] = int(row.get("event_count", 0) or 0) + accepted
         row["last_upload_count"] = accepted
+        row["client_cert_subject"] = str(cert_metadata.get("client_cert_subject", "") or row.get("client_cert_subject", "") or "")
+        row["client_cert_fingerprint"] = str(cert_metadata.get("client_cert_fingerprint", "") or row.get("client_cert_fingerprint", "") or "")
         registry[body.agent_id] = row
         _save_agents_registry(registry)
 

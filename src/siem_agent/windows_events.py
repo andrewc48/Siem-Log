@@ -6,6 +6,33 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, List
 
 
+DEFAULT_WINDOWS_CHANNELS = [
+    "Security",
+    "System",
+    "Application",
+    "Microsoft-Windows-Sysmon/Operational",
+    "Microsoft-Windows-PowerShell/Operational",
+    "Microsoft-Windows-Windows Defender/Operational",
+]
+
+
+def available_windows_channels(channels: List[str]) -> List[str]:
+    found: List[str] = []
+    for channel in channels:
+        safe_channel = str(channel or "").strip()
+        if not safe_channel:
+            continue
+        completed = subprocess.run(
+            ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", f"Get-WinEvent -ListLog '{safe_channel}' | Out-Null"],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if completed.returncode == 0:
+            found.append(safe_channel)
+    return found
+
+
 def _powershell_json(command: str) -> List[Dict[str, object]]:
     completed = subprocess.run(
         ["powershell", "-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", command],
@@ -52,6 +79,7 @@ def read_recent_windows_events(channels: List[str], last_record: Dict[str, int],
             rows.append({
                 "event_type": "windows_event",
                 "channel": safe_channel,
+                "event_subtype": _event_subtype_for_channel(safe_channel),
                 "timestamp": str(row.get("TimeCreated", "") or ""),
                 "event_id": int(row.get("Id", 0) or 0),
                 "provider": str(row.get("ProviderName", "") or ""),
@@ -61,3 +89,14 @@ def read_recent_windows_events(channels: List[str], last_record: Dict[str, int],
                 "message": str(row.get("Message", "") or "")[:4000],
             })
     return rows
+
+
+def _event_subtype_for_channel(channel: str) -> str:
+    value = str(channel or "").lower()
+    if "sysmon" in value:
+        return "sysmon"
+    if "powershell" in value:
+        return "powershell"
+    if "defender" in value:
+        return "defender"
+    return "windows"

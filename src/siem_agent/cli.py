@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
+import subprocess
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -10,6 +13,7 @@ from .collector import AgentCollector
 from .discovery import discover_server
 from .identity import host_identity, installation_id
 from .spool import AgentSpool
+from .service import handle_service_command, save_service_config
 from .transport import AgentTransport
 
 
@@ -21,6 +25,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--state-dir", default="agent_state", help="Agent state directory")
     parser.add_argument("--interval", type=int, default=30, help="Collection interval seconds")
     parser.add_argument("--once", action="store_true", help="Run one collection cycle and exit")
+    parser.add_argument("--ca-cert", default="", help="Custom CA certificate path for HTTPS server verification")
+    parser.add_argument("--client-cert", default="", help="Client certificate path for mTLS-enabled reverse proxies")
+    parser.add_argument("--client-key", default="", help="Client private key path for mTLS-enabled reverse proxies")
+    parser.add_argument("--insecure", action="store_true", help="Disable TLS certificate verification")
+    parser.add_argument("--install-service", action="store_true", help="Install the agent as a Windows service")
+    parser.add_argument("--uninstall-service", action="store_true", help="Uninstall the Windows service")
     return parser.parse_args()
 
 
@@ -50,6 +60,64 @@ def resolve_server_url(args: argparse.Namespace, state_dir: Path) -> str:
         raise RuntimeError("No SIEM server discovered")
     _save_json(state_dir / "server.json", discovered)
     return server_url
+
+
+def build_runtime(raw_args: argparse.Namespace | dict) -> dict:
+    args = raw_args if isinstance(raw_args, argparse.Namespace) else argparse.Namespace(**raw_args)
+    state_dir = Path(args.state_dir)
+    state_dir.mkdir(parents=True, exist_ok=True)
+    server_url = resolve_server_url(args, state_dir)
+    transport = AgentTransport(
+        server_url,
+        ca_cert_path=str(getattr(args, "ca_cert", "") or ""),
+        client_cert_path=str(getattr(args, "client_cert", "") or ""),
+        client_key_path=str(getattr(args, "client_key", "") or ""),
+        verify_tls=not bool(getattr(args, "insecure", False)),
+    )
+    creds = enroll_if_needed(transport, args, state_dir)
+    transport = AgentTransport(
+        str(creds.get("server_url", server_url) or server_url),
+        ca_cert_path=str(getattr(args, "ca_cert", "") or ""),
+        client_cert_path=str(getattr(args, "client_cert", "") or ""),
+        client_key_path=str(getattr(args, "client_key", "") or ""),
+        verify_tls=not bool(getattr(args, "insecure", False)),
+    )
+    return {
+        "args": args,
+        "state_dir": state_dir,
+        "transport": transport,
+        "creds": creds,
+        "collector": AgentCollector(state_dir),
+        "spool": AgentSpool(state_dir),
+        "sequence_path": state_dir / "sequence.json",
+    }
+
+
+def install_windows_service(args: argparse.Namespace) -> None:
+    if os.name != "nt":
+        raise RuntimeError("Windows service installation is only supported on Windows")
+    payload = {
+        "server_url": args.server_url,
+        "token": args.token,
+        "discovery_port": args.discovery_port,
+        "state_dir": args.state_dir,
+        "interval": args.interval,
+        "ca_cert": args.ca_cert,
+        "client_cert": args.client_cert,
+        "client_key": args.client_key,
+        "insecure": args.insecure,
+    }
+    save_service_config(payload)
+    command = [sys.executable, "-m", "siem_agent.service", "--startup", "auto", "install"]
+    subprocess.run(command, check=True)
+    subprocess.run([sys.executable, "-m", "siem_agent.service", "start"], check=True)
+
+
+def uninstall_windows_service() -> None:
+    if os.name != "nt":
+        raise RuntimeError("Windows service removal is only supported on Windows")
+    subprocess.run([sys.executable, "-m", "siem_agent.service", "stop"], check=False)
+    subprocess.run([sys.executable, "-m", "siem_agent.service", "remove"], check=True)
 
 
 def enroll_if_needed(transport: AgentTransport, args: argparse.Namespace, state_dir: Path) -> dict:
@@ -117,15 +185,19 @@ def run_cycle(transport: AgentTransport, creds: dict, collector: AgentCollector,
 
 def main() -> None:
     args = parse_args()
-    state_dir = Path(args.state_dir)
-    state_dir.mkdir(parents=True, exist_ok=True)
-    server_url = resolve_server_url(args, state_dir)
-    transport = AgentTransport(server_url)
-    creds = enroll_if_needed(transport, args, state_dir)
-    transport = AgentTransport(str(creds.get("server_url", server_url) or server_url))
-    collector = AgentCollector(state_dir)
-    spool = AgentSpool(state_dir)
-    sequence_path = state_dir / "sequence.json"
+    if args.install_service:
+        install_windows_service(args)
+        return
+    if args.uninstall_service:
+        uninstall_windows_service()
+        return
+
+    runtime = build_runtime(args)
+    transport = runtime["transport"]
+    creds = runtime["creds"]
+    collector = runtime["collector"]
+    spool = runtime["spool"]
+    sequence_path = runtime["sequence_path"]
 
     if args.once:
         run_cycle(transport, creds, collector, spool, sequence_path)

@@ -36,6 +36,23 @@ Thumbs.db
 *.cap
 *.log
 
+# Endpoint agent local runtime state (contains issued agent credentials)
+agent_state/
+NetworkMonitorAgent/
+
+# Certificate and key material used for HTTPS/mTLS testing
+*.pem
+*.key
+*.crt
+*.cer
+*.pfx
+*.p12
+
+# Misc local secrets
+*.secret
+*.secrets
+*.secrets.*
+
 # Local packaging/build outputs
 dist/
 *.spec

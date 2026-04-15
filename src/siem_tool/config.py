@@ -75,6 +75,10 @@ class SIEMConfig:
     agent_discovery_port: int = 55110
     agent_advertise_url: str = ""
     agent_heartbeat_timeout_seconds: int = 180
+    agent_require_client_certificate: bool = False
+    agent_trusted_proxy_ips: Tuple[str, ...] = ("127.0.0.1", "::1")
+    agent_client_cert_subject_header: str = "X-Client-Cert-Subject"
+    agent_client_cert_fingerprint_header: str = "X-Client-Cert-Fingerprint"
 
 
 def load_config(config_path: str | None) -> SIEMConfig:
@@ -87,6 +91,7 @@ def load_config(config_path: str | None) -> SIEMConfig:
     high_risk_ports = tuple(int(port) for port in raw.get("high_risk_ports", [21, 22, 23, 135, 139, 445, 1433, 3389, 5900]))
     firewall_bruteforce_ports = tuple(int(port) for port in raw.get("firewall_bruteforce_ports", [22, 23, 445, 3389, 5900]))
     network_health_targets = tuple(str(t).strip() for t in raw.get("network_health_targets", []) if str(t).strip())
+    agent_trusted_proxy_ips = tuple(str(ip).strip() for ip in raw.get("agent_trusted_proxy_ips", ["127.0.0.1", "::1"]) if str(ip).strip())
     return SIEMConfig(
         poll_interval_seconds=int(raw.get("poll_interval_seconds", 2)),
         max_bytes_per_second=float(raw.get("max_bytes_per_second", 5_000_000)),
@@ -153,4 +158,8 @@ def load_config(config_path: str | None) -> SIEMConfig:
         agent_discovery_port=int(raw.get("agent_discovery_port", 55110)),
         agent_advertise_url=str(raw.get("agent_advertise_url", "") or ""),
         agent_heartbeat_timeout_seconds=int(raw.get("agent_heartbeat_timeout_seconds", 180)),
+        agent_require_client_certificate=bool(raw.get("agent_require_client_certificate", False)),
+        agent_trusted_proxy_ips=agent_trusted_proxy_ips,
+        agent_client_cert_subject_header=str(raw.get("agent_client_cert_subject_header", "X-Client-Cert-Subject") or "X-Client-Cert-Subject"),
+        agent_client_cert_fingerprint_header=str(raw.get("agent_client_cert_fingerprint_header", "X-Client-Cert-Fingerprint") or "X-Client-Cert-Fingerprint"),
     )

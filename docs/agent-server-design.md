@@ -185,6 +185,16 @@ Good enough for first implementation:
 
 Do not rely on unauthenticated plaintext UDP plus open HTTP as the steady-state transport.
 
+### Current Repo Reality
+
+The current implementation is intentionally lab-friendly:
+
+- UDP discovery is plaintext and only for same-subnet discovery.
+- Event upload currently uses the configured HTTP server endpoint unless you place the app behind TLS.
+- Enrollment uses a shared bootstrap token and then server-issued agent secret.
+
+That is acceptable for a home lab or resume demo, but for any serious environment the next step is to put the server behind TLS and rotate away from the default token.
+
 ---
 
 ## Transport Design
@@ -361,6 +371,15 @@ Minimum acceptable design:
 - server-side validation of event size and schema
 - replay protection with sequence numbers and timestamps
 - audit logs for enrollment, revocation, and configuration changes
+
+Practical guidance for this repository:
+
+- change `agent_enrollment_token` before deploying beyond a personal lab
+- do not expose the server directly to the public internet
+- prefer reverse proxy TLS termination if you keep the FastAPI app on plain HTTP internally
+- treat UDP discovery as convenience only, not trust
+- prefer explicit `--server-url` on routed or segmented networks
+- keep agent state directories protected because they contain the issued agent credential
 
 Good follow-up design:
 

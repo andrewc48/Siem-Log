@@ -8,7 +8,7 @@ from typing import Dict, List
 import psutil
 
 from .identity import host_identity
-from .windows_events import read_recent_windows_events
+from .windows_events import DEFAULT_WINDOWS_CHANNELS, available_windows_channels, read_recent_windows_events
 
 
 class AgentCollector:
@@ -18,6 +18,8 @@ class AgentCollector:
         self.last_windows_record: Dict[str, int] = self._load_offsets()
         self.started_mono = time.monotonic()
         self.sent_identity = False
+        self.windows_channels = available_windows_channels(DEFAULT_WINDOWS_CHANNELS)
+        self._process_name_cache: Dict[int, str] = {}
 
     def collect(self) -> List[Dict[str, object]]:
         rows: List[Dict[str, object]] = []
@@ -57,12 +59,12 @@ class AgentCollector:
                 "remote_port": int(raddr.port if hasattr(raddr, "port") else (raddr[1] if len(raddr) > 1 else 0)),
                 "status": str(conn.status or ""),
                 "pid": int(conn.pid) if conn.pid else None,
+                "process_name": self._process_name(int(conn.pid)) if conn.pid else "",
             })
         return rows
 
     def _collect_windows_events(self) -> List[Dict[str, object]]:
-        channels = ["Security", "System", "Application"]
-        rows = read_recent_windows_events(channels, self.last_windows_record)
+        rows = read_recent_windows_events(self.windows_channels, self.last_windows_record)
         if not rows:
             return []
         for row in rows:
@@ -88,3 +90,17 @@ class AgentCollector:
     def _save_offsets(self) -> None:
         import json
         self.last_record_path.write_text(json.dumps(self.last_windows_record, indent=2), encoding="utf-8")
+
+    def _process_name(self, pid: int) -> str:
+        if pid <= 0:
+            return ""
+        if pid in self._process_name_cache:
+            return self._process_name_cache[pid]
+        try:
+            name = psutil.Process(pid).name()
+        except Exception:
+            name = ""
+        self._process_name_cache[pid] = str(name or "")
+        if len(self._process_name_cache) > 2048:
+            self._process_name_cache = dict(list(self._process_name_cache.items())[-1024:])
+        return self._process_name_cache[pid]

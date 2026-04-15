@@ -32,6 +32,8 @@ The project supports a central-server deployment model.
 - Endpoint agents can use UDP discovery on the local subnet to find the server, or connect directly with `--server-url`.
 - The central dashboard correlates server-side network sensor data with endpoint Windows and host telemetry.
 
+For a concrete deployment walkthrough, see `docs/lab-deployment.md`.
+
 ---
 
 ## Quick Start (Local)
@@ -167,7 +169,11 @@ It is responsible for:
 Current endpoint telemetry includes:
 
 - Windows Event Logs from `Security`, `System`, and `Application`
+- Sysmon events from `Microsoft-Windows-Sysmon/Operational` when Sysmon is installed
+- PowerShell operational events from `Microsoft-Windows-PowerShell/Operational`
+- Microsoft Defender operational events from `Microsoft-Windows-Windows Defender/Operational`
 - active connection snapshots
+- process names associated with connection snapshots when available
 - host identity and heartbeat metadata
 
 Example agent commands:
@@ -181,11 +187,19 @@ siem-agent --server-url http://192.168.1.10:8080 --token lab-enroll
 
 # Run one collection/upload cycle only
 siem-agent --server-url http://192.168.1.10:8080 --token lab-enroll --once
+
+# Install as a Windows service
+siem-agent --server-url https://siem.local --token YOUR_TOKEN --install-service
+
+# Remove the Windows service
+siem-agent --uninstall-service
 ```
+
+When installed as a service, the agent stores its service configuration under `%PROGRAMDATA%\NetworkMonitorAgent\service_config.json`.
 
 ## Build a Portable EXE (Optional)
 
-If you want a packaged executable directory:
+If you want packaged executable directories for both the central server and the endpoint agent:
 
 1. Right-click PowerShell and run:
 
@@ -197,11 +211,13 @@ powershell -ExecutionPolicy Bypass -File .\Build-NetworkMonitor-EXE.ps1
 
 ```text
 dist\NetworkMonitor\NetworkMonitor.exe
+dist\NetworkMonitor-Agent\NetworkMonitor-Agent.exe
 ```
 
 Notes:
 - First run can take a few minutes.
 - The packaged app still needs Npcap installed if you use `pcap` mode.
+- The packaged endpoint agent uses `NetworkMonitor-Agent.exe` and can be distributed to monitored Windows endpoints.
 - Firewall logging access rules still apply as before.
 
 ## Proxmox Windows VM Deployment Notes
@@ -261,6 +277,8 @@ siem --duration 60                     # run CLI monitor for 60 s
 siem-agent --token lab-enroll
 siem-agent --server-url http://192.168.1.10:8080 --token lab-enroll
 siem-agent --server-url http://192.168.1.10:8080 --token lab-enroll --once
+siem-agent --server-url https://siem.local --token YOUR_TOKEN --install-service
+siem-agent --uninstall-service
 ```
 
 ---
@@ -316,6 +334,10 @@ Edit `config/default_config.json` or supply a custom path with `--config`.
 | `agent_discovery_port` | 55110 | UDP port used by endpoint agents to discover the server |
 | `agent_advertise_url` | `""` | Optional explicit URL returned to agents instead of auto-derived host:port |
 | `agent_heartbeat_timeout_seconds` | 180 | How long before an agent is marked stale in the dashboard |
+| `agent_require_client_certificate` | false | Require a client certificate fingerprint/header from a trusted reverse proxy |
+| `agent_trusted_proxy_ips` | [`127.0.0.1`, `::1`] | Proxy IPs allowed to forward client certificate identity headers |
+| `agent_client_cert_subject_header` | `X-Client-Cert-Subject` | Header name used for forwarded client certificate subject |
+| `agent_client_cert_fingerprint_header` | `X-Client-Cert-Fingerprint` | Header name used for forwarded client certificate fingerprint |
 
 All retention settings can also be changed live from the dashboard **Settings** view.
 
@@ -330,6 +352,54 @@ python run.py --host 0.0.0.0 --port 8080
 ```
 
 > **Security note:** Bind behind a reverse proxy (nginx / Caddy) with TLS and authentication. Do not expose port 8080 to the public internet without protection.
+
+### Recommended Security Baseline
+
+For a centralized analyst-style deployment, do these before presenting the project outside a personal lab:
+
+1. Change `agent_enrollment_token` from the default value.
+2. Put the central server behind TLS or a reverse proxy that provides HTTPS.
+3. Do not rely on UDP discovery as a trust mechanism; use it only as a convenience method.
+4. Prefer explicit `--server-url` for routed, segmented, or production-like networks.
+5. Protect agent state directories because they contain the issued agent credential.
+
+The current implementation is appropriate for a home lab or portfolio demo, but stronger certificate-based trust is still the next step for a more production-like deployment.
+
+### Certificate-Based Auth Implementation
+
+The practical way to implement certificate-based auth in this repository is to use **mutual TLS at a reverse proxy** instead of trying to turn the development FastAPI server into a PKI endpoint directly.
+
+Recommended flow:
+
+1. Put the SIEM app behind Nginx, Caddy, or another reverse proxy that terminates HTTPS.
+2. Configure the proxy to require a client certificate for agent routes such as `/api/agents/*`.
+3. Configure the proxy to forward the validated certificate subject and fingerprint in trusted headers.
+4. Enable `agent_require_client_certificate` on the SIEM server.
+5. Configure the agent with `--ca-cert`, `--client-cert`, and `--client-key` so it presents a client cert and verifies the server cert.
+6. During enrollment, the server stores the presented certificate fingerprint with the agent record.
+7. On future heartbeats and uploads, the server compares the forwarded fingerprint to the stored value and rejects mismatches.
+
+Why this design:
+
+- It keeps certificate handling in the component built for TLS.
+- It avoids exposing the raw FastAPI app directly to the network.
+- It supports gradual rollout: shared token first, mTLS later.
+
+What is implemented now:
+
+- The agent supports HTTPS verification with `--ca-cert`.
+- The agent supports client certificates with `--client-cert` and `--client-key`.
+- The server can require trusted proxy-forwarded certificate identity headers when `agent_require_client_certificate` is enabled.
+
+What is still recommended later:
+
+- automated certificate issuance/rotation
+- certificate revocation handling
+- blocking direct access to the app except through the trusted reverse proxy
+
+## Lab Deployment
+
+For a full central-host plus endpoint-agent walkthrough, see `docs/lab-deployment.md`.
 
 ## Whole-Network Capture Setup (VM/Old PC)
 

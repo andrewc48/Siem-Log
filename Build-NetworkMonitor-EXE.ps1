@@ -14,7 +14,14 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
 & .\.venv\Scripts\python.exe -m pip install -e . pyinstaller
 
-Write-Host "[Network Monitor] Building executable..."
+if (Test-Path "dist\NetworkMonitor") {
+    Remove-Item -Recurse -Force "dist\NetworkMonitor"
+}
+if (Test-Path "dist\NetworkMonitor-Agent") {
+    Remove-Item -Recurse -Force "dist\NetworkMonitor-Agent"
+}
+
+Write-Host "[Network Monitor] Building central server executable..."
 & .\.venv\Scripts\pyinstaller `
   --name NetworkMonitor `
   --noconfirm `
@@ -23,4 +30,14 @@ Write-Host "[Network Monitor] Building executable..."
   --add-data "config;config" `
   run.py
 
-Write-Host "Build complete: dist\NetworkMonitor\NetworkMonitor.exe"
+Write-Host "[Network Monitor] Building endpoint agent executable..."
+& .\.venv\Scripts\pyinstaller `
+  --name NetworkMonitor-Agent `
+  --noconfirm `
+  --onedir `
+  run_agent.py
+
+Write-Host "Build complete:"
+Write-Host "  dist\NetworkMonitor\NetworkMonitor.exe"
+Write-Host "  dist\NetworkMonitor-Agent\NetworkMonitor-Agent.exe"
+

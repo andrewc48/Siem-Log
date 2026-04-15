@@ -61,5 +61,9 @@
   "agent_discovery_enabled": true,
   "agent_discovery_port": 55110,
   "agent_advertise_url": "",
-  "agent_heartbeat_timeout_seconds": 180
+  "agent_heartbeat_timeout_seconds": 180,
+  "agent_require_client_certificate": false,
+  "agent_trusted_proxy_ips": ["127.0.0.1", "::1"],
+  "agent_client_cert_subject_header": "X-Client-Cert-Subject",
+  "agent_client_cert_fingerprint_header": "X-Client-Cert-Fingerprint"
 }
