@@ -13,7 +13,7 @@ A central-host Python SIEM with a live web dashboard, lightweight Windows endpoi
 - **Optional deep decode** — TShark frame decode API for selected packets when `tshark` is installed
 - **Sensor mode (pcap)** — optional packet capture mode for mirrored/bridged interfaces to observe whole-LAN traffic flows
 - **Anomaly detection** — absolute threshold, spike detection (EWMA), suspicious-port alerts, connection fan-out detection
-- **Device inventory** — ARP-cache scanning, subnet ping-sweep, custom device names, persistent inventory
+- **Device inventory** — ARP-cache scanning, subnet ping-sweep, custom device names, router identification, manual router-role overrides, persistent inventory
 - **Bluetooth monitor (local host)** — logs Bluetooth device connect/disconnect state changes (Windows PnP based)
 - **Endpoint agent mode** — lightweight `siem-agent` collects host telemetry on monitored Windows devices and forwards it to the central SIEM host
 - **Agent inventory + endpoint telemetry UI** — dedicated Agents view for endpoint health, queue depth, uploads, and recent forwarded telemetry
@@ -49,8 +49,10 @@ For a concrete deployment walkthrough, see `docs/lab-deployment.md`.
 ```bash
 # Clone or download the project, then:
 cd "SIEM Tool"
-pip install -e .
+pip install -r requirements-runtime.txt -e .
 ```
+
+`requirements-runtime.txt` is the shared bootstrap manifest used by the Windows launcher scripts. It installs the runtime stack used by this project: `psutil`, `fastapi`, `uvicorn`, `python-dotenv`, `openai`, `scapy`, and `pywin32` on Windows.
 
 ### 3 · Run the dashboard
 
@@ -78,6 +80,18 @@ If the endpoint is on the same subnet and the central host has discovery enabled
 siem-agent --token lab-enroll
 ```
 
+### Validate The Environment
+
+Run the validation script with the same interpreter you use for the app:
+
+```bash
+python validate.py
+```
+
+Or on Windows, double-click **Validate-SIEM.bat** in the project root for a graphical validation report.
+
+It checks syntax across `src/`, verifies the required runtime dependencies import cleanly, and imports the main SIEM server and agent modules.
+
 ## Quick Deploy (Release)
 
 Use this flow for a fresh machine from GitHub to running dashboard in a few minutes.
@@ -97,7 +111,7 @@ python -m venv .venv
 # Windows PowerShell
 .\.venv\Scripts\Activate.ps1
 
-pip install -e .
+pip install -r requirements-runtime.txt -e .
 ```
 
 3. Start dashboard:
@@ -136,7 +150,7 @@ For Windows machines, you can launch with a double-click and automatic dependenc
 1. Double-click `NetworkMonitor-Start.bat`
 2. The script will:
   - create `.venv` if missing
-  - install/update required dependencies
+  - install/update runtime dependencies from `requirements-runtime.txt`
   - start the dashboard
 
 Open `http://localhost:8080` after it starts.
@@ -206,6 +220,8 @@ If you want packaged executable directories for both the central server and the 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\Build-NetworkMonitor-EXE.ps1
 ```
+
+The build script installs `requirements-build.txt`, which includes the full runtime dependency set plus `pyinstaller`.
 
 2. Output is created at:
 
@@ -471,6 +487,7 @@ SIEM Tool/
 │   ├── bluetooth.jsonl
 │   ├── devices.json
 │   ├── device_aliases.json
+│   ├── device_role_overrides.json
 │   └── siem_settings.json          ← runtime settings saved via UI
 └── src/
   ├── siem_tool/
@@ -509,7 +526,7 @@ SIEM Tool/
 | GET | `/api/system/status` | Runtime sensor status + health checks |
 | GET | `/api/startup/diagnostics` | Startup blockers and remediation suggestions |
 | GET | `/api/setup/wizard` | First-run readiness checklist |
-| GET | `/api/devices` | All discovered devices |
+| GET | `/api/devices` | All discovered devices with router detection metadata |
 | GET | `/api/agents` | Registered endpoint agents and current health state |
 | GET | `/api/agents/events?limit=N` | Recent endpoint telemetry forwarded by agents |
 | POST | `/api/agents/register` | Agent enrollment and credential issuance |
@@ -517,6 +534,7 @@ SIEM Tool/
 | POST | `/api/agents/events/bulk` | Bulk endpoint telemetry ingest |
 | PUT | `/api/devices/{ip}/alias` | Set device name |
 | DELETE | `/api/devices/{ip}/alias` | Clear device name |
+| PUT | `/api/devices/{ip}/router-role` | Set router override (`router`, `not_router`, or auto-detect) |
 | POST | `/api/scan` | Trigger subnet ping-sweep |
 | POST | `/api/network/ping` | Ping a specific device by IP and return current health row |
 | GET | `/api/alerts?limit=N` | Alert history |
@@ -639,6 +657,7 @@ siem --set-device-name 192.168.1.20 "Office-Laptop"
 - `logs/agents.json`: registered endpoint agent inventory and heartbeat state
 - `logs/devices.json`: current discovered device inventory
 - `logs/device_aliases.json`: user-defined names by IP
+- `logs/device_role_overrides.json`: user-defined router or not-router overrides by IP
 - `logs/archive/*.jsonl`: long-term archived records moved from active logs by retention pruning
 
 Retention controls:

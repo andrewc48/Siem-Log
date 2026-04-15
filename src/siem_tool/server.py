@@ -500,6 +500,9 @@ def start_background_engine(
                     "mac": d.mac,
                     "hostname": d.hostname,
                     "alias": d.alias,
+                    "is_router": d.is_router,
+                    "router_detection_source": d.router_detection_source,
+                    "router_override": d.router_override,
                 }
                 for d in _engine.list_devices()
             ] if _engine is not None else []
@@ -1237,6 +1240,10 @@ class AliasBody(BaseModel):
     alias: str
 
 
+class RouterOverrideBody(BaseModel):
+    router_override: str = Field(default="")
+
+
 @app.put("/api/devices/{ip}/alias")
 async def set_alias(ip: str, body: AliasBody) -> JSONResponse:
     assert _engine is not None
@@ -1251,6 +1258,17 @@ async def clear_alias(ip: str) -> JSONResponse:
     ip_decoded = ip.replace("__colon__", ":")
     removed = _engine.clear_device_alias(ip=ip_decoded)
     return JSONResponse({"ok": removed})
+
+
+@app.put("/api/devices/{ip}/router-role")
+async def set_router_role(ip: str, body: RouterOverrideBody) -> JSONResponse:
+    assert _engine is not None
+    ip_decoded = ip.replace("__colon__", ":")
+    normalized = str(body.router_override or "").strip().lower()
+    if normalized not in {"", "router", "not_router"}:
+        raise HTTPException(status_code=400, detail="router_override must be '', 'router', or 'not_router'")
+    _engine.set_device_router_override(ip=ip_decoded, router_override=normalized)
+    return JSONResponse({"ok": True, "router_override": normalized})
 
 
 @app.post("/api/scan")

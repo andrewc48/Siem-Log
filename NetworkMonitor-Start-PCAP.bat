@@ -28,7 +28,7 @@ if errorlevel 1 goto :fail
 echo Installing or updating dependencies...
 python -m pip install --upgrade pip setuptools wheel
 if errorlevel 1 goto :fail
-python -m pip install -e .
+python -m pip install -r requirements-runtime.txt -e .
 if errorlevel 1 goto :fail
 
 echo Checking Npcap/scapy support...

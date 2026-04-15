@@ -89,6 +89,10 @@ class DeviceRecord:
     alias: str
     first_seen: str
     last_seen: str
+    is_router: bool = False
+    router_detection_source: str = ""
+    router_detection_reason: str = ""
+    router_override: str = ""
 
 
 @dataclass(slots=True)

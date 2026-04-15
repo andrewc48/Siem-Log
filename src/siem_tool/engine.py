@@ -82,6 +82,12 @@ class SIEMEngine:
     def clear_device_alias(self, ip: str) -> bool:
         return self.device_monitor.clear_alias(ip=ip)
 
+    def set_device_router_override(self, ip: str, router_override: str) -> None:
+        self.device_monitor.set_router_override(ip=ip, router_override=router_override)
+
+    def primary_router_ip(self) -> str:
+        return self.device_monitor.get_primary_router_ip()
+
     def scan_subnet(self) -> int:
         return self.device_monitor.scan_subnet()
 

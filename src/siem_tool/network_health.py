@@ -191,6 +191,9 @@ class NetworkHealthMonitor:
         targets = list(self._targets)
         if targets:
             return targets[0]
+        preferred = self._preferred_router_from_devices()
+        if preferred:
+            return preferred
         gw = self._detect_default_gateway()
         if gw:
             return gw
@@ -198,6 +201,33 @@ class NetworkHealthMonitor:
         if guessed:
             return guessed
         return "127.0.0.1"
+
+    def _preferred_router_from_devices(self) -> str:
+        details = self._device_details_map()
+        if not details:
+            return ""
+
+        routers = [row for row in details.values() if bool(row.get("is_router"))]
+        if not routers:
+            return ""
+
+        manual = sorted(
+            str(row.get("ip", ""))
+            for row in routers
+            if str(row.get("router_override", "")) == "router"
+        )
+        if manual:
+            return manual[0]
+
+        auto_gateway = sorted(
+            str(row.get("ip", ""))
+            for row in routers
+            if str(row.get("router_detection_source", "")) == "default_gateway"
+        )
+        if auto_gateway:
+            return auto_gateway[0]
+
+        return sorted(str(row.get("ip", "")) for row in routers if str(row.get("ip", "")))[0]
 
     def _guess_router_from_discovered_devices(self) -> str:
         if self._device_details_provider is None and self._device_targets_provider is None:
@@ -263,6 +293,9 @@ class NetworkHealthMonitor:
                 "mac": str(row.get("mac", "") or ""),
                 "hostname": str(row.get("hostname", "") or ""),
                 "alias": str(row.get("alias", "") or ""),
+                "is_router": bool(row.get("is_router", False)),
+                "router_detection_source": str(row.get("router_detection_source", "") or ""),
+                "router_override": str(row.get("router_override", "") or ""),
             }
         return result
 
@@ -275,6 +308,8 @@ class NetworkHealthMonitor:
                 "mac": str(r.get("mac", "") or ""),
                 "hostname": str(r.get("hostname", "") or ""),
                 "alias": str(r.get("alias", "") or ""),
+                "is_router": bool(r.get("is_router", False)),
+                "router_detection_source": str(r.get("router_detection_source", "") or ""),
                 "device_name": str(r.get("alias", "") or r.get("hostname", "") or r.get("target", "") or ""),
                 "last_ok": bool(r.get("ok")),
                 "last_rtt_ms": float(r.get("rtt_ms")) if r.get("rtt_ms") is not None else None,

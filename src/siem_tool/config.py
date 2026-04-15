@@ -59,6 +59,7 @@ class SIEMConfig:
     subnet_scan_timeout_ms: int = 500
     subnet_scan_workers: int = 64
     device_aliases_file: str = "logs/device_aliases.json"
+    device_role_overrides_file: str = "logs/device_role_overrides.json"
     devices_inventory_file: str = "logs/devices.json"
     # Log retention
     events_retention_hours: float = 24.0
@@ -143,6 +144,7 @@ def load_config(config_path: str | None) -> SIEMConfig:
         subnet_scan_timeout_ms=int(raw.get("subnet_scan_timeout_ms", 500)),
         subnet_scan_workers=int(raw.get("subnet_scan_workers", 64)),
         device_aliases_file=str(raw.get("device_aliases_file", "logs/device_aliases.json")),
+        device_role_overrides_file=str(raw.get("device_role_overrides_file", "logs/device_role_overrides.json")),
         devices_inventory_file=str(raw.get("devices_inventory_file", "logs/devices.json")),
         events_retention_hours=float(raw.get("events_retention_hours", 24.0)),
         alerts_retention_hours=float(raw.get("alerts_retention_hours", 72.0)),

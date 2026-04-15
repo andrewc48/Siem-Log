@@ -89,18 +89,19 @@ def _print_devices(devices: Iterable[DeviceRecord], as_json: bool = False) -> No
     if as_json:
         print(json.dumps([asdict(r) for r in rows], indent=2))
         return
-    col_widths = (18, 20, 30, 19, 34)
+    col_widths = (18, 20, 30, 19, 14, 34)
     header = (
         f"{'IP':<{col_widths[0]}} {'Alias':<{col_widths[1]}} "
-        f"{'Hostname':<{col_widths[2]}} {'MAC':<{col_widths[3]}} {'Last Seen':<{col_widths[4]}}"
+        f"{'Hostname':<{col_widths[2]}} {'MAC':<{col_widths[3]}} {'Role':<{col_widths[4]}} {'Last Seen':<{col_widths[5]}}"
     )
     print(header)
     print("-" * sum(col_widths))
     for row in rows:
+        role = "router" if row.is_router else ("not-router" if row.router_override == "not_router" else "-")
         print(
             f"{row.ip:<{col_widths[0]}} {(row.alias or '-'):<{col_widths[1]}} "
             f"{(row.hostname or '-'):<{col_widths[2]}} {(row.mac or '-'):<{col_widths[3]}} "
-            f"{row.last_seen:<{col_widths[4]}}"
+            f"{role:<{col_widths[4]}} {row.last_seen:<{col_widths[5]}}"
         )
 
 

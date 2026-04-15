@@ -12,7 +12,7 @@ if (-not (Test-Path ".venv\Scripts\python.exe")) {
 }
 
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip setuptools wheel
-& .\.venv\Scripts\python.exe -m pip install -e . pyinstaller
+& .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt -e .
 
 if (Test-Path "dist\NetworkMonitor") {
     Remove-Item -Recurse -Force "dist\NetworkMonitor"

@@ -461,6 +461,54 @@
     try { S.devices = await apiFetch('GET', '/api/devices'); renderDevices(); } catch (_) {}
   }
 
+  function humanizeRouterSource(source) {
+    const labels = {
+      manual_override: 'manual override',
+      default_gateway: 'default gateway',
+      name_heuristic: 'name heuristic',
+      vendor_name: 'vendor name',
+      mac_vendor: 'MAC vendor',
+      subnet_rank: 'subnet ranking',
+      combined_heuristic: 'combined heuristics',
+    };
+    return labels[String(source || '').trim()] || 'auto-detect';
+  }
+
+  function routerDetectionSummary(device) {
+    const override = String(device?.router_override || '');
+    if (override === 'router') {
+      return 'Manual override: this device is forced to Router.';
+    }
+    if (override === 'not_router') {
+      return 'Manual override: this device is forced to Not Router.';
+    }
+    if (device?.is_router) {
+      const source = humanizeRouterSource(device?.router_detection_source);
+      const reason = String(device?.router_detection_reason || '').trim();
+      return reason ? `Auto-detected as Router via ${source}: ${reason}` : `Auto-detected as Router via ${source}.`;
+    }
+    return 'Auto-detect does not currently classify this device as a router.';
+  }
+
+  function renderRouterBadge(device) {
+    if (device?.is_router) {
+      const label = device?.router_override === 'router' ? 'Router *' : 'Router';
+      return `
+        <div class="device-role-cell" title="${esc(routerDetectionSummary(device))}">
+          <span class="pill pill-low">${esc(label)}</span>
+          <span class="role-meta">${esc(humanizeRouterSource(device?.router_detection_source))}</span>
+        </div>`;
+    }
+    if (device?.router_override === 'not_router') {
+      return `
+        <div class="device-role-cell" title="${esc(routerDetectionSummary(device))}">
+          <span class="pill pill-muted">Not router</span>
+          <span class="role-meta">manual override</span>
+        </div>`;
+    }
+    return '<span class="text-muted">—</span>';
+  }
+
   async function fetchAgents() {
     try {
       S.agents = await apiFetch('GET', '/api/agents');
@@ -670,10 +718,12 @@
       !q || d.ip.includes(q) ||
       (d.alias || '').toLowerCase().includes(q) ||
       (d.hostname || '').toLowerCase().includes(q) ||
-      (d.mac || '').includes(q)
+      (d.mac || '').includes(q) ||
+      (d.router_detection_reason || '').toLowerCase().includes(q) ||
+      (d.is_router && 'router'.includes(q))
     );
     if (!rows.length) {
-      tbody.innerHTML = '<tr class="empty-row"><td colspan="6">No devices found</td></tr>';
+      tbody.innerHTML = '<tr class="empty-row"><td colspan="7">No devices found</td></tr>';
       return;
     }
     tbody.innerHTML = rows.map(d => `
@@ -685,11 +735,17 @@
               ? `<span class="alias-name">${esc(d.alias)}</span>`
               : `<span class="text-muted">—</span>`}
             <button class="alias-btn" title="Edit name"
-              data-ip="${esc(d.ip)}" data-alias="${esc(d.alias || '')}">✎</button>
+              data-ip="${esc(d.ip)}"
+              data-alias="${esc(d.alias || '')}"
+              data-router-override="${esc(d.router_override || '')}"
+              data-router-source="${esc(d.router_detection_source || '')}"
+              data-router-reason="${esc(d.router_detection_reason || '')}"
+              data-is-router="${d.is_router ? '1' : '0'}">✎</button>
           </div>
         </td>
         <td><code class="text-muted">${esc(d.mac || '—')}</code></td>
         <td>${esc(d.hostname || '—')}</td>
+        <td>${renderRouterBadge(d)}</td>
         <td class="text-muted text-sm">${fmt_dt(d.last_seen)}</td>
         <td>
           <button class="icon-btn" title="Analyze with AI"
@@ -698,7 +754,14 @@
       </tr>`).join('');
 
     tbody.querySelectorAll('.alias-btn[data-ip]').forEach(b =>
-      b.addEventListener('click', () => openAliasModal(b.dataset.ip, b.dataset.alias))
+      b.addEventListener('click', () => openAliasModal({
+        ip: b.dataset.ip,
+        alias: b.dataset.alias,
+        routerOverride: b.dataset.routerOverride,
+        routerSource: b.dataset.routerSource,
+        routerReason: b.dataset.routerReason,
+        isRouter: b.dataset.isRouter === '1',
+      }))
     );
     tbody.querySelectorAll('[data-ai-item]').forEach(b =>
       b.addEventListener('click', () =>
@@ -1669,11 +1732,29 @@
   }
 
   /* ═══════════════════════ Alias Modal ══════════════════════ */
-  function openAliasModal(ip, alias) {
-    document.getElementById('modal-ip-label').textContent = 'IP: ' + ip;
-    document.getElementById('modal-alias-input').value = alias || '';
-    document.getElementById('alias-modal').dataset.ip = ip;
+  function updateRouterDetectionLabel() {
+    const modal = document.getElementById('alias-modal');
+    const routerOverride = document.getElementById('modal-router-override')?.value || '';
+    const label = document.getElementById('modal-router-detection');
+    if (!modal || !label) return;
+    label.textContent = routerDetectionSummary({
+      router_override: routerOverride,
+      router_detection_source: modal.dataset.routerSource || '',
+      router_detection_reason: modal.dataset.routerReason || '',
+      is_router: modal.dataset.isRouter === '1',
+    });
+  }
+
+  function openAliasModal(device) {
+    document.getElementById('modal-ip-label').textContent = 'IP: ' + device.ip;
+    document.getElementById('modal-alias-input').value = device.alias || '';
+    document.getElementById('modal-router-override').value = device.routerOverride || '';
+    document.getElementById('alias-modal').dataset.ip = device.ip;
+    document.getElementById('alias-modal').dataset.routerSource = device.routerSource || '';
+    document.getElementById('alias-modal').dataset.routerReason = device.routerReason || '';
+    document.getElementById('alias-modal').dataset.isRouter = device.isRouter ? '1' : '0';
     document.getElementById('alias-modal').classList.remove('hidden');
+    updateRouterDetectionLabel();
     document.getElementById('modal-alias-input').focus();
   }
 
@@ -1684,10 +1765,12 @@
   async function saveAlias() {
     const ip    = document.getElementById('alias-modal').dataset.ip;
     const alias = document.getElementById('modal-alias-input').value.trim();
+    const routerOverride = document.getElementById('modal-router-override').value;
     const enc   = encodeURIComponent(ip.replace(/:/g, '__colon__'));
     try {
       await apiFetch('PUT', `/api/devices/${enc}/alias`, { alias });
-      toast('Name saved', 'ok');
+      await apiFetch('PUT', `/api/devices/${enc}/router-role`, { router_override: routerOverride });
+      toast('Device settings saved', 'ok');
       closeAliasModal();
       fetchDevices();
     } catch (e) { toast('Failed: ' + e.message, 'err'); }
@@ -1955,6 +2038,7 @@
     document.getElementById('modal-close')?.addEventListener('click', closeAliasModal);
     document.getElementById('modal-save')?.addEventListener('click', saveAlias);
     document.getElementById('modal-clear')?.addEventListener('click', clearAlias);
+    document.getElementById('modal-router-override')?.addEventListener('change', updateRouterDetectionLabel);
     document.getElementById('alias-modal')?.addEventListener('click', e => {
       if (e.target === document.getElementById('alias-modal')) closeAliasModal();
     });
