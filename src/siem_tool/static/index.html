@@ -802,13 +802,19 @@
         <button class="modal-close" id="modal-close">✕</button>
       </div>
       <p class="modal-ip" id="modal-ip-label"></p>
-      <input class="modal-input" type="text" id="modal-alias-input" placeholder="e.g. Office-Laptop" maxlength="64" />
-      <select class="filter-select modal-input" id="modal-router-override">
-        <option value="">Auto-detect router role</option>
-        <option value="router">Force router</option>
-        <option value="not_router">Force not router</option>
-      </select>
-      <p class="modal-hint" id="modal-router-detection"></p>
+      <div>
+        <label class="modal-label">Device Name</label>
+        <input class="modal-input" type="text" id="modal-alias-input" placeholder="e.g. Office-Laptop" maxlength="64" />
+      </div>
+      <div>
+        <label class="modal-label">Router Role</label>
+        <select class="filter-select modal-input" id="modal-router-override">
+          <option value="">Auto-detect router role</option>
+          <option value="router">Force router</option>
+          <option value="not_router">Force not router</option>
+        </select>
+        <p class="modal-hint" id="modal-router-detection"></p>
+      </div>
       <div class="modal-actions">
         <button class="btn btn-ghost" id="modal-clear">Clear Name</button>
         <button class="btn btn-primary" id="modal-save">Save</button>

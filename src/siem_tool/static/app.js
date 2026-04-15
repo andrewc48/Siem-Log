@@ -493,17 +493,18 @@
   function renderRouterBadge(device) {
     if (device?.is_router) {
       const label = device?.router_override === 'router' ? 'Router *' : 'Router';
+      const source = humanizeRouterSource(device?.router_detection_source);
       return `
         <div class="device-role-cell" title="${esc(routerDetectionSummary(device))}">
           <span class="pill pill-low">${esc(label)}</span>
-          <span class="role-meta">${esc(humanizeRouterSource(device?.router_detection_source))}</span>
+          <span class="role-meta">${esc(source)}</span>
         </div>`;
     }
     if (device?.router_override === 'not_router') {
       return `
         <div class="device-role-cell" title="${esc(routerDetectionSummary(device))}">
           <span class="pill pill-muted">Not router</span>
-          <span class="role-meta">manual override</span>
+          <span class="role-meta">manual</span>
         </div>`;
     }
     return '<span class="text-muted">—</span>';
